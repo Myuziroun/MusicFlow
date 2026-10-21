@@ -105,11 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           ))}
         </div>
       </div>
-
-      {/* Footer Info */}
-      <div className="pt-4 border-t border-zinc-800 text-[11px] text-zinc-500 px-3">
-        Local Client-Only • No Cloud Sync
-      </div>
     </aside>
   );
 };
