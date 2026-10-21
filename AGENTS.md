@@ -45,6 +45,7 @@ Dokumen ini adalah sumber kebenaran (*Single Source of Truth*) bagi AI Agent (Op
   * `refactor:` (restrukturisasi kode tanpa mengubah fungsionalitas)
   * `chore:` (konfigurasi build, dependensi, atau perkakas)
 * **Atomic Commits:** Kelompokkan commit berdasarkan satu kesatuan kerja logis yang utuh.
+* **Tidak menggunakan ikon:** DILARANG KERAS MENULIS README DENGAN IKON, GUNAKAN PENJELASAN YANG PROFESIONAL*
 
 ## 6. Standar Dokumentasi (README & Docs)
 * Setiap pembaruan dokumentasi harus mencakup: identitas & deskripsi proyek, teknologi utama, fitur berjalan, prasyarat sistem, langkah instalasi/setup, panduan eksekusi (dev/prod), dan gambaran struktur direktori.
