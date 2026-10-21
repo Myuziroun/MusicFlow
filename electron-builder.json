@@ -1,0 +1,35 @@
+{
+  "appId": "com.musicflow.desktop",
+  "productName": "MusicFlow",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "server/**/*"
+  ],
+  "asarUnpack": [
+    "server/**/*"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "dir",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "MusicFlow",
+    "differentialPackage": false
+  }
+}
