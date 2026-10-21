@@ -7,12 +7,14 @@
   "files": [
     "dist/**/*",
     "electron/**/*",
-    "server/**/*"
+    "server/**/*",
+    "build/**/*"
   ],
   "asarUnpack": [
     "server/**/*"
   ],
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",

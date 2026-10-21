@@ -73,6 +73,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'MusicFlow - Music Player',
+    icon: path.join(__dirname, '../build/icon.ico'),
     backgroundColor: '#000000',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
