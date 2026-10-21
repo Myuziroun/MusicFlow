@@ -27,6 +27,8 @@ downloads/
 .env
 .env.*
 !.env.example
+opencode.json
+.opencode/
 
 # Logs & Debugging
 logs/
