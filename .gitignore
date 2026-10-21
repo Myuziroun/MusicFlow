@@ -29,6 +29,8 @@ downloads/
 !.env.example
 opencode.json
 .opencode/
+AGENTS.md
+agents.md
 
 # Logs & Debugging
 logs/
