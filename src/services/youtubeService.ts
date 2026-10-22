@@ -235,77 +235,103 @@ export class YouTubeService {
     duration: number;
     thumbnail?: string;
   }> {
-    // 1. Inisialisasi job konversi ke Public API
-    const startUrl = `https://loader.to/ajax/download.php?format=mp3&url=${encodeURIComponent(youtubeUrl)}`;
+    // 1. Ekstraksi ID video dari URL atau input mentah
+    const idMatch = youtubeUrl.match(/(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/shorts\/|^)([a-zA-Z0-9_-]{11})(?:[&?]|$)/);
+    const videoId = idMatch ? idMatch[1] : youtubeUrl.trim();
 
-    interface PublicJobResponse {
-      id?: string;
-      title?: string;
-      thumbnail_url?: string;
-      progress_url?: string;
-      info?: { image?: string; title?: string };
+    if (!videoId) {
+      throw new Error('ID video YouTube tidak valid');
     }
 
-    let jobData: PublicJobResponse | null = null;
-    try {
+    const defaultHeaders = {
+      'Referer': 'https://convertytmp3.org/',
+      'Origin': 'https://convertytmp3.org',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    };
+
+    const makeGetRequest = async (url: string, headers: Record<string, string> = defaultHeaders) => {
       if (Capacitor.isNativePlatform()) {
-        const nativeRes = await CapacitorHttp.get({ url: startUrl });
-        jobData = (typeof nativeRes.data === 'string' ? JSON.parse(nativeRes.data) : nativeRes.data) as PublicJobResponse;
+        const res = await CapacitorHttp.get({
+          url,
+          headers,
+          connectTimeout: 10000,
+          readTimeout: 10000
+        });
+        return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
       } else {
-        const res = await fetch(startUrl);
-        jobData = (await res.json()) as PublicJobResponse;
+        const res = await fetch(url, { headers });
+        return await res.json();
       }
-    } catch (err) {
-      console.warn('Inisialisasi public download loader.to gagal:', err);
-    }
+    };
 
-    if (!jobData || !jobData.id) {
-      throw new Error('Public Engine gagal memulai proses unduhan. Silakan periksa koneksi internet atau gunakan link video lain.');
-    }
-
-    const jobId = jobData.id;
-    const progressUrl = jobData.progress_url || `https://lto2.affadaffa.com/api/progress?id=${jobId}`;
-
-    // 2. Polling status hingga konversi selesai (maksimal ~45 detik)
-    let downloadUrl = '';
-    let finalTitle = jobData.title || title || 'Audio';
-    let finalThumbnail = jobData.thumbnail_url || jobData.info?.image;
-    let finalDuration = 0;
-
-    interface PublicProgressResponse {
-      title?: string;
-      thumbnail_url?: string;
-      video_duration?: number | string;
-      download_url?: string;
-      success?: number;
-      progress?: number;
-    }
-
-    for (let i = 0; i < 25; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 1800));
-
-      try {
-        let pData: PublicProgressResponse | null = null;
-        if (Capacitor.isNativePlatform()) {
-          const pRes = await CapacitorHttp.get({ url: progressUrl });
-          pData = (typeof pRes.data === 'string' ? JSON.parse(pRes.data) : pRes.data) as PublicProgressResponse;
-        } else {
-          const pRes = await fetch(progressUrl);
-          pData = (await pRes.json()) as PublicProgressResponse;
+    // 2. Dapatkan API Key (dengan fallback kunci default terverifikasi)
+    const DEFAULT_API_KEY = 'ytmp3_0e54c87af0e7951af060df4bfde2ecba82d0f022592d18b8ca4a0ddec43b43f5';
+    let apiKey = DEFAULT_API_KEY;
+    try {
+      if (!Capacitor.isNativePlatform()) {
+        const pageRes = await fetch('https://convertytmp3.org/', { headers: defaultHeaders, signal: AbortSignal.timeout(2000) });
+        if (pageRes.ok) {
+          const html = await pageRes.text();
+          const match = html.match(/var apiKey=['"]([^'"]+)['"]/);
+          if (match && match[1]) apiKey = match[1];
         }
+      }
+    } catch {
+      // Gunakan fallback default key
+    }
 
-        if (pData) {
-          if (pData.title) finalTitle = pData.title;
-          if (pData.thumbnail_url) finalThumbnail = pData.thumbnail_url;
-          if (pData.video_duration) finalDuration = Number(pData.video_duration) || 0;
+    // 3. Autentikasi sesi konversi ke engine publik
+    const authUrl = `https://epsilon.epsiloncloud.org/api/v1/auth?api_key=${apiKey}&_=${Date.now()}`;
+    const authData = await makeGetRequest(authUrl);
+    if (!authData || !authData.key) {
+      throw new Error('Gagal melakukan autentikasi dengan server konversi publik.');
+    }
 
-          if (pData.download_url && (pData.success === 1 || (pData.progress && pData.progress >= 1000) || pData.download_url.startsWith('http'))) {
-            downloadUrl = pData.download_url;
-            break;
+    // 4. Inisialisasi job konversi
+    const initUrl = `https://epsilon.epsiloncloud.org/api/v1/init?_=${Date.now()}`;
+    const initData = await makeGetRequest(initUrl, {
+      ...defaultHeaders,
+      'Authorization': `Bearer ${authData.key}`
+    });
+    if (!initData || !initData.convertURL) {
+      throw new Error('Server publik gagal menginisialisasi sesi konversi.');
+    }
+
+    // 5. Kirim perintah konversi video ke MP3
+    const convertUrl = `${initData.convertURL}&v=${videoId}&f=mp3&_=${Date.now()}`;
+    let convData = await makeGetRequest(convertUrl);
+
+    if (convData?.redirect === 1 && convData?.redirectURL) {
+      convData = await makeGetRequest(convData.redirectURL);
+    }
+
+    if (!convData) {
+      throw new Error('Server publik gagal memproses link video YouTube.');
+    }
+
+    let downloadUrl = convData.downloadURL || '';
+    let finalTitle = convData.title || title || 'Audio';
+    const finalThumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+    const finalDuration = 0;
+
+    // 6. Polling status progres konversi hingga selesai
+    if (convData.progressURL) {
+      for (let i = 0; i < 25; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        try {
+          const pData = await makeGetRequest(`${convData.progressURL}&_=${Date.now()}`);
+          if (pData) {
+            if (pData.title) finalTitle = pData.title;
+            if (pData.progress >= 3 || convData.downloadURL) {
+              if (!downloadUrl && convData.downloadURL) {
+                downloadUrl = convData.downloadURL;
+              }
+              if (pData.progress >= 3) break;
+            }
           }
+        } catch (pollErr) {
+          console.warn('Polling progress error:', pollErr);
         }
-      } catch (pollErr) {
-        console.warn('Polling progress error:', pollErr);
       }
     }
 
@@ -313,40 +339,49 @@ export class YouTubeService {
       throw new Error('Proses konversi audio di server publik melebihi batas waktu (timeout). Silakan coba lagi.');
     }
 
-    // 3. Unduh file fisik MP3 hasil konversi
+    // 7. Unduh file fisik MP3 hasil konversi
+    const downloadTarget = downloadUrl.includes('&v=')
+      ? downloadUrl
+      : `${downloadUrl}&v=${videoId}&f=mp3&r=convertytmp3.org`;
+
     let blob: Blob;
     if (Capacitor.isNativePlatform()) {
       try {
         const audioRes = await CapacitorHttp.get({
-          url: downloadUrl,
-          responseType: 'blob'
+          url: downloadTarget,
+          responseType: 'blob',
+          headers: defaultHeaders,
+          connectTimeout: 20000,
+          readTimeout: 60000
         });
+
         if (audioRes.data instanceof Blob) {
           blob = audioRes.data;
         } else if (typeof audioRes.data === 'string') {
-          const binary = atob(audioRes.data);
+          const cleanBase64 = audioRes.data.includes(',') ? audioRes.data.split(',')[1] : audioRes.data;
+          const binary = atob(cleanBase64);
           const array = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) {
             array[i] = binary.charCodeAt(i);
           }
           blob = new Blob([array], { type: 'audio/mpeg' });
         } else {
-          const rawRes = await fetch(downloadUrl);
+          const rawRes = await fetch(downloadTarget, { headers: defaultHeaders });
           blob = await rawRes.blob();
         }
       } catch {
-        const rawRes = await fetch(downloadUrl);
+        const rawRes = await fetch(downloadTarget, { headers: defaultHeaders });
         blob = await rawRes.blob();
       }
     } else {
-      const audioRes = await fetch(downloadUrl);
+      const audioRes = await fetch(downloadTarget, { headers: defaultHeaders });
       if (!audioRes.ok) {
         throw new Error('Gagal mengambil file MP3 dari server publik.');
       }
       blob = await audioRes.blob();
     }
 
-    // Ekstraksi dan sanitasi judul serta artis secara konsisten
+    // 8. Ekstraksi dan sanitasi judul serta artis secara konsisten
     const meta = cleanTrackMetadata(finalTitle || title || '', artist);
     const safeTitle = `${meta.artist} - ${meta.title}`.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'Audio';
     const fileName = `${safeTitle}.mp3`;

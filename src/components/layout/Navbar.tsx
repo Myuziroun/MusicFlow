@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Radio, CheckCircle2, XCircle, QrCode } from 'lucide-react';
+import { Search, Plus, Radio, Laptop, Cloud, WifiOff, QrCode } from 'lucide-react';
 import { useLibrary } from '../../context/LibraryContext';
 import { YouTubeService } from '../../services/youtubeService';
 
@@ -12,15 +12,27 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, onOpenReceive, activeTab }) => {
   const { searchQuery, setSearchQuery } = useLibrary();
   const [engineOnline, setEngineOnline] = useState<boolean>(false);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine ?? true);
 
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     const checkEngine = async () => {
       const ok = await YouTubeService.isLocalEngineAvailable();
       setEngineOnline(ok);
     };
     checkEngine();
     const interval = setInterval(checkEngine, 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   return (
@@ -54,19 +66,23 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, onOpenReceive, act
           <div
             title={
               engineOnline
-                ? 'Engine Lokal: Aktif (yt-dlp & FFmpeg berjalan di PC)'
-                : 'Engine Publik: Aktif (Cloud Fallback)'
+                ? 'Engine Lokal: Aktif (yt-dlp PC)'
+                : isOnline
+                ? 'Engine Cloud: Aktif'
+                : 'Offline: Tidak ada koneksi internet'
             }
             className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all cursor-help ${
-              engineOnline
+              engineOnline || isOnline
                 ? 'bg-zinc-900 border-zinc-700 text-white shadow-sm'
                 : 'bg-zinc-950 border-zinc-800 text-zinc-500'
             }`}
           >
             {engineOnline ? (
-              <CheckCircle2 className="w-4 h-4 text-white" />
+              <Laptop className="w-4 h-4 text-white" />
+            ) : isOnline ? (
+              <Cloud className="w-4 h-4 text-white" />
             ) : (
-              <XCircle className="w-4 h-4 text-zinc-400" />
+              <WifiOff className="w-4 h-4 text-zinc-500" />
             )}
           </div>
 
@@ -76,20 +92,27 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, onOpenReceive, act
               <div className="flex items-center gap-1.5 font-semibold">
                 {engineOnline ? (
                   <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                    <Laptop className="w-3.5 h-3.5 text-white" />
                     <span>Engine Lokal: Aktif</span>
+                  </>
+                ) : isOnline ? (
+                  <>
+                    <Cloud className="w-3.5 h-3.5 text-white" />
+                    <span>Engine Cloud: Aktif</span>
                   </>
                 ) : (
                   <>
-                    <XCircle className="w-3.5 h-3.5 text-zinc-400" />
-                    <span>Engine Publik: Aktif</span>
+                    <WifiOff className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Perangkat Offline</span>
                   </>
                 )}
               </div>
               <p className="text-[11px] text-zinc-400 mt-0.5">
                 {engineOnline
                   ? 'yt-dlp & FFmpeg lokal berjalan di background PC'
-                  : 'Unduhan via cloud fallback standalone'}
+                  : isOnline
+                  ? 'Konversi unduhan MP3 online siap digunakan'
+                  : 'Tidak ada koneksi internet untuk mengunduh lagu'}
               </p>
             </div>
           </div>
