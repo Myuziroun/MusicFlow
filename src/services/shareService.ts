@@ -127,17 +127,43 @@ export class ShareService {
     if (Capacitor.isNativePlatform()) {
       let resolvedPath = track.filePath || '';
 
-      // Jika path fisik belum ada tapi audioBlob ada di IndexedDB, tulis ke cache lokal
-      if (!resolvedPath && track.audioBlob) {
-        const base64 = await this.blobToBase64(track.audioBlob);
-        const fileName = `share_${track.id.replace(/[^a-zA-Z0-9]/g, '_')}.mp3`;
-        const writeRes = await Filesystem.writeFile({
-          path: `cache/${fileName}`,
-          data: base64,
-          directory: Directory.Cache,
-          recursive: true
-        });
-        resolvedPath = writeRes.uri;
+      // Pastikan berkas fisik tersedia dan valid
+      let audioBlob = track.audioBlob;
+      if (!audioBlob && track.id) {
+        try {
+          const dbTrack = await db.tracks.get(track.id);
+          if (dbTrack?.audioBlob) {
+            audioBlob = dbTrack.audioBlob;
+          }
+        } catch {}
+      }
+
+      // Verifikasi apakah path fisik dapat diakses langsung oleh OS
+      let fileAccessible = false;
+      if (resolvedPath) {
+        try {
+          const stat = await Filesystem.stat({ path: resolvedPath });
+          if (stat.size > 0) fileAccessible = true;
+        } catch {
+          fileAccessible = false;
+        }
+      }
+
+      // Jika path fisik belum ada atau tidak dapat diakses, tulis audioBlob ke cache internal aplikasi
+      if (!fileAccessible && audioBlob) {
+        try {
+          const base64 = await this.blobToBase64(audioBlob);
+          const fileName = `share_${track.id.replace(/[^a-zA-Z0-9]/g, '_')}.mp3`;
+          const writeRes = await Filesystem.writeFile({
+            path: `cache/${fileName}`,
+            data: base64,
+            directory: Directory.Cache,
+            recursive: true
+          });
+          resolvedPath = writeRes.uri;
+        } catch (cacheErr) {
+          console.warn('Gagal menulis file cache untuk sharing:', cacheErr);
+        }
       }
 
       await NativeShareServer.startServer({
@@ -147,7 +173,7 @@ export class ShareService {
         title: track.title,
         artist: track.artist,
         duration: track.duration,
-        fileSize: track.fileSize || (track.audioBlob ? track.audioBlob.size : 0),
+        fileSize: track.fileSize || (audioBlob ? audioBlob.size : 0),
         coverUrl: track.coverUrl
       });
     } else {
@@ -307,12 +333,16 @@ export class ShareService {
         });
         if (res.status === 200 && res.data) {
           return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        } else if (res.status === 403) {
+          throw new Error('Token sesi berbagi tidak cocok atau tidak valid');
         } else if (res.status === 404) {
           throw new Error('Sesi berbagi tidak ditemukan atau telah kedaluwarsa');
         }
       } catch (err: any) {
         console.warn('Native CapacitorHttp.get gagal, mencoba fetch standar:', err);
-        if (err.message && err.message.includes('kedaluwarsa')) throw err;
+        if (err.message && (err.message.includes('kedaluwarsa') || err.message.includes('Token') || err.message.includes('tidak cocok'))) {
+          throw err;
+        }
       }
     }
 

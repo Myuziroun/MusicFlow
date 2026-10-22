@@ -1,5 +1,8 @@
 package com.musiclistener.downloader;
 
+import android.content.Context;
+import android.net.wifi.WifiManager;
+import android.os.PowerManager;
 import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -25,6 +28,10 @@ public class ShareServerPlugin extends Plugin {
     private ServerSocket serverSocket = null;
     private ExecutorService threadPool = null;
     private volatile boolean isRunning = false;
+
+    // Locks untuk mencegah Wi-Fi sleep dan CPU throttle saat melayani transfer P2P
+    private WifiManager.WifiLock wifiLock = null;
+    private PowerManager.WakeLock wakeLock = null;
 
     // Data sesi berbagi aktif
     private String activeToken = "";
@@ -113,29 +120,71 @@ public class ShareServerPlugin extends Plugin {
         int port = call.getInt("port", 3001);
         activeToken = call.getString("token", "");
         activeFilePath = call.getString("filePath", "");
-        if (activeFilePath != null && activeFilePath.startsWith("file://")) {
-            activeFilePath = activeFilePath.substring(7);
+        if (activeFilePath != null) {
+            if (activeFilePath.startsWith("file://")) {
+                activeFilePath = activeFilePath.substring(7);
+            }
+            try {
+                activeFilePath = URLDecoder.decode(activeFilePath, "UTF-8");
+            } catch (Exception ignored) {}
         }
         activeTitle = call.getString("title", "Lagu");
         activeArtist = call.getString("artist", "Artis Tidak Diketahui");
-        activeDuration = call.getInt("duration", 0);
-        activeFileSize = call.getInt("fileSize", 0);
+
+        Double durDbl = call.getDouble("duration");
+        if (durDbl != null) {
+            activeDuration = durDbl.longValue();
+        } else {
+            Integer durInt = call.getInt("duration", 0);
+            activeDuration = durInt != null ? durInt : 0;
+        }
+
+        Long fsLong = call.getLong("fileSize");
+        if (fsLong != null) {
+            activeFileSize = fsLong;
+        } else {
+            Integer fsInt = call.getInt("fileSize", 0);
+            activeFileSize = fsInt != null ? fsInt : 0;
+        }
+
         activeCoverUrl = call.getString("coverUrl", "");
         transferStatus = "waiting";
         transferProgress = 0;
 
         stopServerInternal();
 
+        // 1. Dapatkan WifiLock dan WakeLock agar Wi-Fi & CPU tidak masuk power-save mode saat transfer
         try {
-            // Bind ke semua interface (0.0.0.0)
-            serverSocket = new ServerSocket(port);
+            Context ctx = getContext().getApplicationContext();
+            WifiManager wm = (WifiManager) ctx.getSystemService(Context.WIFI_SERVICE);
+            if (wm != null) {
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "MusicFlow:ShareServerWifi");
+                wifiLock.setReferenceCounted(false);
+                wifiLock.acquire();
+            }
+
+            PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MusicFlow:ShareServerWake");
+                wakeLock.setReferenceCounted(false);
+                wakeLock.acquire(15 * 60 * 1000L); // 15 menit batas waktu
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal mengaktifkan WifiLock/WakeLock: " + e.getMessage());
+        }
+
+        // 2. Bind eksplisit ke IPv4 wildcard (0.0.0.0) agar tidak ditolak oleh konfigurasi default IPv6 Android
+        try {
+            serverSocket = new ServerSocket();
+            serverSocket.setReuseAddress(true);
+            serverSocket.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port));
             isRunning = true;
             threadPool = Executors.newCachedThreadPool();
 
             // Jalankan loop accept di background thread
             new Thread(this::listenConnections).start();
 
-            Log.i(TAG, "Micro HTTP server aktif pada port " + port + " untuk token " + activeToken);
+            Log.i(TAG, "Micro HTTP server aktif pada port " + port + " (0.0.0.0) untuk token " + activeToken);
             JSObject ret = new JSObject();
             ret.put("success", true);
             ret.put("port", port);
@@ -180,6 +229,21 @@ public class ShareServerPlugin extends Plugin {
             threadPool.shutdownNow();
             threadPool = null;
         }
+
+        // Lepaskan lock Wi-Fi & WakeLock saat server berhenti
+        if (wifiLock != null) {
+            try {
+                if (wifiLock.isHeld()) wifiLock.release();
+            } catch (Exception ignored) {}
+            wifiLock = null;
+        }
+        if (wakeLock != null) {
+            try {
+                if (wakeLock.isHeld()) wakeLock.release();
+            } catch (Exception ignored) {}
+            wakeLock = null;
+        }
+
         transferStatus = "waiting";
         transferProgress = 0;
     }
@@ -188,6 +252,7 @@ public class ShareServerPlugin extends Plugin {
         while (isRunning && serverSocket != null && !serverSocket.isClosed()) {
             try {
                 Socket client = serverSocket.accept();
+                client.setSoTimeout(12000); // Batasi timeout baca koneksi client (12 detik)
                 if (threadPool != null && !threadPool.isShutdown()) {
                     threadPool.execute(() -> handleClient(client));
                 }
@@ -319,6 +384,8 @@ public class ShareServerPlugin extends Plugin {
                 "Content-Length: " + totalSize + "\r\n" +
                 "Content-Disposition: attachment; filename=\"musicflow_track.mp3\"\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                "Access-Control-Allow-Headers: *\r\n" +
                 "Connection: close\r\n\r\n";
 
         out.write(header.getBytes());
@@ -374,7 +441,11 @@ public class ShareServerPlugin extends Plugin {
         for (String pair : pairs) {
             String[] kv = pair.split("=");
             if (kv.length == 2 && kv[0].equalsIgnoreCase(param)) {
-                return URLDecoder.decode(kv[1]);
+                try {
+                    return URLDecoder.decode(kv[1], "UTF-8");
+                } catch (Exception e) {
+                    return kv[1];
+                }
             }
         }
         return "";
