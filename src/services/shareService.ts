@@ -4,8 +4,13 @@ import { db } from '../db/database';
 import { FileStorageService } from './fileStorage';
 import type { Track } from '../types/music';
 
+export interface NetworkInterfaceInfo {
+  name: string;
+  ip: string;
+}
+
 export interface ShareServerPluginInterface {
-  getLocalIp(): Promise<{ ip: string }>;
+  getLocalIp(): Promise<{ ip: string; allIps?: NetworkInterfaceInfo[] }>;
   startServer(options: {
     port: number;
     token: string;
@@ -28,6 +33,7 @@ export interface ShareSessionInfo {
   port: number;
   qrPayload: string;
   track: Track;
+  availableIps: NetworkInterfaceInfo[];
 }
 
 export interface ShareTrackInfo {
@@ -58,43 +64,61 @@ export class ShareService {
   }
 
   /**
-   * Mendapatkan alamat IP lokal perangkat
+   * Mendapatkan informasi jaringan lengkap (IP utama dan semua adapter valid)
    */
-  static async getDeviceIp(): Promise<string> {
+  static async getDeviceNetworkInfo(): Promise<{ ip: string; allIps: NetworkInterfaceInfo[] }> {
     if (Capacitor.isNativePlatform()) {
       try {
         const res = await NativeShareServer.getLocalIp();
-        if (res && res.ip && res.ip !== '127.0.0.1') {
-          return res.ip;
-        }
+        const primary = res && res.ip && res.ip !== '127.0.0.1' ? res.ip : '127.0.0.1';
+        const list = res.allIps && res.allIps.length > 0 ? res.allIps : [{ name: 'Wi-Fi / Hotspot', ip: primary }];
+        return { ip: primary, allIps: list };
       } catch (e) {
         console.warn('Gagal memanggil NativeShareServer.getLocalIp:', e);
       }
     }
 
-    // Fallback ke server Electron/Desktop lokal jika tersedia
+    // Fallback ke server Electron/Desktop lokal
     try {
       const res = await fetch('http://localhost:3001/api/share/ip');
       if (res.ok) {
         const data = await res.json();
-        return data.ip || '127.0.0.1';
+        const primary = data.ip || '127.0.0.1';
+        const list = data.allIps && data.allIps.length > 0 ? data.allIps : [{ name: 'Jaringan Utama', ip: primary }];
+        return { ip: primary, allIps: list };
       }
     } catch {
       // Offline fallback
     }
 
-    return '127.0.0.1';
+    return { ip: '127.0.0.1', allIps: [{ name: 'Default', ip: '127.0.0.1' }] };
+  }
+
+  /**
+   * Mendapatkan alamat IP lokal perangkat
+   */
+  static async getDeviceIp(): Promise<string> {
+    const net = await this.getDeviceNetworkInfo();
+    return net.ip;
+  }
+
+  /**
+   * Membuat QR payload standar MusicFlow
+   */
+  static buildQrPayload(ip: string, port: number, token: string, trackId: string): string {
+    return `musicflow://share?ip=${ip}&port=${port}&token=${token}&id=${encodeURIComponent(trackId)}`;
   }
 
   /**
    * Memulai sesi pengiriman lagu (SENDER)
    */
-  static async startSharing(track: Track): Promise<ShareSessionInfo> {
+  static async startSharing(track: Track, overrideIp?: string): Promise<ShareSessionInfo> {
     // 1. Buat token 6 digit acak
     const token = Math.floor(100000 + Math.random() * 900000).toString();
     const port = 3001;
 
-    let deviceIp = await this.getDeviceIp();
+    const netInfo = await this.getDeviceNetworkInfo();
+    let deviceIp = overrideIp || netInfo.ip;
     if (!deviceIp || deviceIp === '127.0.0.1') {
       deviceIp = '192.168.1.1'; // Fallback display jika offline murni
     }
@@ -138,6 +162,7 @@ export class ShareService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
+          selectedIp: deviceIp,
           track: {
             title: track.title,
             artist: track.artist,
@@ -162,14 +187,15 @@ export class ShareService {
     }
 
     // Buat format QR payload terstandar
-    const qrPayload = `musicflow://share?ip=${deviceIp}&port=${port}&token=${token}&id=${encodeURIComponent(track.id)}`;
+    const qrPayload = this.buildQrPayload(deviceIp, port, token, track.id);
 
     return {
       token,
       ip: deviceIp,
       port,
       qrPayload,
-      track
+      track,
+      availableIps: netInfo.allIps
     };
   }
 

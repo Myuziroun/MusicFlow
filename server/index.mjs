@@ -337,27 +337,69 @@ app.get('/api/files/:filename', (req, res) => {
 // SHAREFLOW: P2P LOCAL MUSIC SHARING ENGINE
 // ==========================================
 
-function getLocalIp() {
+/**
+ * Mendapatkan daftar antarmuka jaringan fisik yang valid
+ * Mengecualikan adapter virtual seperti VirtualBox, VMware, vEthernet, dsb.
+ */
+function getNetworkInterfacesList() {
   const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        if (
-          iface.address.startsWith('192.168.') ||
-          iface.address.startsWith('10.') ||
-          iface.address.startsWith('172.')
-        ) {
-          return iface.address;
-        }
+  const list = [];
+
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family !== 'IPv4' || addr.internal) continue;
+
+      const ip = addr.address;
+      const mac = (addr.mac || '').toLowerCase();
+
+      // Deteksi adapter virtual berdasarkan MAC address OUI dan nama
+      const isVirtualMac =
+        mac.startsWith('0a:00:27') || // VirtualBox
+        mac.startsWith('00:50:56') || // VMware
+        mac.startsWith('00:0c:29') || // VMware
+        mac.startsWith('00:15:5d');   // Hyper-V
+
+      const isVirtualSubnet =
+        ip.startsWith('192.168.56.') || // Default VirtualBox Host-Only subnet
+        ip.startsWith('169.254.');      // APIPA (Self-assigned link-local)
+
+      const isVirtualName = /virtual|vbox|vmware|vethernet|wsl|hyper-v|pseudo|loopback|tap|bluetooth|\*/i.test(name);
+
+      let score = 50;
+      const lowerName = name.toLowerCase();
+
+      // Berikan skor tinggi untuk Wi-Fi fisik atau Ethernet fisik
+      if (/wi-fi|wlan|wireless/i.test(lowerName)) {
+        score = 100;
+      } else if (/ethernet|lan/i.test(lowerName)) {
+        score = 80;
       }
+
+      // Potong skor drastis jika terdeteksi virtual
+      if (isVirtualMac || isVirtualSubnet || isVirtualName) {
+        score -= 70;
+      }
+
+      list.push({
+        name,
+        ip,
+        mac,
+        score,
+        isVirtual: isVirtualMac || isVirtualSubnet || isVirtualName
+      });
     }
   }
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
+
+  // Urutkan dari skor tertinggi (Wi-Fi/Ethernet fisik nomor satu)
+  list.sort((a, b) => b.score - a.score);
+  return list;
+}
+
+function getLocalIp() {
+  const list = getNetworkInterfacesList();
+  if (list.length > 0) {
+    return list[0].ip;
   }
   return '127.0.0.1';
 }
@@ -365,12 +407,23 @@ function getLocalIp() {
 const activeShareSessions = new Map();
 
 /**
- * Mendapatkan IP lokal pengirim
+ * Mendapatkan IP lokal pengirim beserta seluruh antarmuka yang tersedia
  */
 app.get('/api/share/ip', (req, res) => {
+  const list = getNetworkInterfacesList();
+  const primaryIp = list.length > 0 ? list[0].ip : '127.0.0.1';
+
+  // Sediakan antarmuka fisik untuk opsi switch
+  const nonVirtual = list.filter((i) => !i.isVirtual);
+  const candidates = nonVirtual.length > 0 ? nonVirtual : list;
+
   res.json({
-    ip: getLocalIp(),
-    port: Number(PORT)
+    ip: primaryIp,
+    port: Number(PORT),
+    allIps: candidates.map((item) => ({
+      name: `${item.name} (${item.ip})`,
+      ip: item.ip
+    }))
   });
 });
 
@@ -378,10 +431,12 @@ app.get('/api/share/ip', (req, res) => {
  * Pendaftaran sesi share oleh pengirim (Desktop)
  */
 app.post('/api/share/register', (req, res) => {
-  const { token, track, base64Audio } = req.body;
+  const { token, track, base64Audio, selectedIp } = req.body;
   if (!token || !track) {
     return res.status(400).json({ error: 'Token dan metadata lagu wajib disertakan' });
   }
+
+  const hostIp = selectedIp || getLocalIp();
 
   let audioBuffer = null;
   if (base64Audio) {
@@ -413,7 +468,7 @@ app.post('/api/share/register', (req, res) => {
   res.json({
     success: true,
     token,
-    ip: getLocalIp(),
+    ip: hostIp,
     port: Number(PORT)
   });
 });

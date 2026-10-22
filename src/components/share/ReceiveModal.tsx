@@ -134,7 +134,14 @@ export const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) =
     } catch (err: any) {
       console.error('Proses transfer gagal:', err);
       setStatus('error');
-      setErrorMessage(err.message || 'Gagal menerima file dari pengirim');
+      const rawMsg = err.message || '';
+      if (rawMsg.includes('Failed to fetch') || rawMsg.includes('NetworkError') || rawMsg.includes('AbortError')) {
+        setErrorMessage(
+          `Gagal menghubungi ${ip}:${port}. Pastikan kedua perangkat berada di Wi-Fi yang sama atau gunakan Hotspot HP. Jika pengirim adalah Desktop PC, pastikan Windows Defender Firewall mengizinkan akses jaringan.`
+        );
+      } else {
+        setErrorMessage(rawMsg || 'Gagal menerima file dari pengirim');
+      }
     }
   };
 

@@ -1,6 +1,7 @@
 package com.musiclistener.downloader;
 
 import android.util.Log;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -38,10 +39,14 @@ public class ShareServerPlugin extends Plugin {
 
     /**
      * Mendapatkan alamat IP lokal perangkat (Wi-Fi atau Hotspot Tethering)
+     * Mengabaikan interface virtual/cellular dan memprioritaskan wlan / ap
      */
     @PluginMethod
     public void getLocalIp(PluginCall call) {
-        String ipAddress = null;
+        String bestIp = null;
+        int bestScore = -1;
+        JSArray allIps = new JSArray();
+
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
@@ -49,30 +54,54 @@ public class ShareServerPlugin extends Plugin {
                 // Lewati interface loopback atau yang tidak aktif
                 if (iface.isLoopback() || !iface.isUp()) continue;
 
+                String ifaceName = iface.getName().toLowerCase();
+                // Abaikan interface dummy, cellular rmnet, tunnel, atau p2p
+                if (ifaceName.contains("dummy") || ifaceName.contains("p2p") ||
+                    ifaceName.contains("tun") || ifaceName.contains("rmnet") ||
+                    ifaceName.contains("sit") || ifaceName.contains("ccmni")) {
+                    continue;
+                }
+
+                int score = 10;
+                if (ifaceName.startsWith("wlan") || ifaceName.startsWith("swlan")) {
+                    score = 100; // Wi-Fi client
+                } else if (ifaceName.startsWith("ap") || ifaceName.startsWith("softap")) {
+                    score = 90; // Hotspot / Tethering
+                } else if (ifaceName.startsWith("eth")) {
+                    score = 80; // Ethernet
+                }
+
                 Enumeration<InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     InetAddress addr = addresses.nextElement();
                     if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
                         String host = addr.getHostAddress();
-                        // Prioritaskan subnet lokal standar (192.168.x.x, 10.x.x.x, 172.x.x.x)
-                        if (host != null && (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172."))) {
-                            ipAddress = host;
-                            break;
+                        if (host != null && !host.startsWith("127.") && !host.startsWith("169.254.")) {
+                            JSObject obj = new JSObject();
+                            String displayName = iface.getDisplayName() != null ? iface.getDisplayName() : iface.getName();
+                            obj.put("name", displayName + " (" + host + ")");
+                            obj.put("ip", host);
+                            allIps.put(obj);
+
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestIp = host;
+                            }
                         }
                     }
                 }
-                if (ipAddress != null) break;
             }
         } catch (Exception e) {
             Log.e(TAG, "Gagal mendapatkan IP lokal: " + e.getMessage());
         }
 
-        if (ipAddress == null) {
-            ipAddress = "127.0.0.1";
+        if (bestIp == null) {
+            bestIp = "127.0.0.1";
         }
 
         JSObject ret = new JSObject();
-        ret.put("ip", ipAddress);
+        ret.put("ip", bestIp);
+        ret.put("allIps", allIps);
         call.resolve(ret);
     }
 

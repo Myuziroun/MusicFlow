@@ -21,6 +21,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
 
   const pollIntervalRef = useRef<any>(null);
 
+  const renderQr = async (payload: string) => {
+    try {
+      const qrImage = await QRCode.toDataURL(payload, {
+        width: 320,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      });
+      setQrUrl(qrImage);
+    } catch (e) {
+      console.warn('Gagal render QR:', e);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen || !track) {
       if (session) {
@@ -46,19 +62,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
         if (!isMounted) return;
 
         setSession(s);
-
-        // Generate QR Code data URL
-        const qrImage = await QRCode.toDataURL(s.qrPayload, {
-          width: 320,
-          margin: 1,
-          color: {
-            dark: '#000000',
-            light: '#ffffff'
-          }
-        });
+        await renderQr(s.qrPayload);
         if (!isMounted) return;
 
-        setQrUrl(qrImage);
         setStatus('waiting');
 
         // Mulai polling status transfer dari sisi server
@@ -96,6 +102,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
     };
   }, [isOpen, track]);
 
+  const handleSwitchIp = async (newIp: string) => {
+    if (!session || !track) return;
+    const newPayload = ShareService.buildQrPayload(newIp, session.port, session.token, track.id);
+    setSession({
+      ...session,
+      ip: newIp,
+      qrPayload: newPayload
+    });
+    await renderQr(newPayload);
+  };
+
   const handleCopyCode = () => {
     if (!session) return;
     const shareText = `${session.ip}:${session.port}#${session.token}`;
@@ -115,7 +132,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 select-none animate-in fade-in">
-      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl relative animate-in zoom-in-95 flex flex-col items-center text-center">
+      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl relative animate-in zoom-in-95 flex flex-col items-center text-center max-h-[92vh] overflow-y-auto">
         {/* Tombol Tutup */}
         <button
           onClick={handleClose}
@@ -132,7 +149,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
         <p className="text-xs text-zinc-400 mb-4">Bagikan lagu secara offline antar perangkat</p>
 
         {/* Ringkasan Lagu */}
-        <div className="w-full bg-zinc-900/70 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3 mb-4 text-left">
+        <div className="w-full bg-zinc-900/70 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3 mb-3 text-left">
           <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-zinc-700 overflow-hidden flex-shrink-0 flex items-center justify-center">
             {track.coverUrl ? (
               <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
@@ -151,7 +168,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
         </div>
 
         {/* QR Code Container */}
-        <div className="w-56 h-56 bg-white rounded-2xl p-3 shadow-lg flex items-center justify-center mb-4">
+        <div className="w-52 h-52 bg-white rounded-2xl p-3 shadow-lg flex items-center justify-center mb-3">
           {status === 'initializing' ? (
             <div className="flex flex-col items-center gap-2 text-black">
               <Loader2 className="w-8 h-8 animate-spin" />
@@ -167,16 +184,48 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
           )}
         </div>
 
+        {/* Pilihan / Penampil Interface Jaringan IP */}
+        {session && (
+          <div className="w-full mb-3 text-left">
+            <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+              <span>Alamat Jaringan (IP Host):</span>
+              {session.availableIps && session.availableIps.length > 1 && (
+                <span className="text-[10px] text-zinc-400">Ganti Adapter</span>
+              )}
+            </div>
+            {session.availableIps && session.availableIps.length > 1 ? (
+              <select
+                value={session.ip}
+                onChange={(e) => handleSwitchIp(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-700 text-white rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-white transition-all font-mono"
+              >
+                {session.availableIps.map((adapter) => (
+                  <option key={adapter.ip} value={adapter.ip} className="bg-zinc-950 text-white">
+                    {adapter.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-zinc-300 font-mono">
+                {session.ip}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Token Kode & Tombol Salin */}
         {session && (
-          <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 flex items-center justify-between mb-4">
+          <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 flex items-center justify-between mb-3">
             <div className="text-left pl-2">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Token Perangkat</span>
-              <span className="text-sm font-mono font-bold text-white tracking-widest">{session.token}</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">Token & Alamat</span>
+              <span className="text-sm font-mono font-bold text-white tracking-wider">{session.token}</span>
+              <span className="text-[10px] text-zinc-400 font-mono block truncate max-w-[170px]">
+                {session.ip}:{session.port}#{session.token}
+              </span>
             </div>
             <button
               onClick={handleCopyCode}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 transition-colors font-medium"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 transition-colors font-medium flex-shrink-0"
               title="Salin Alamat & Token"
             >
               {copied ? (
@@ -231,12 +280,18 @@ export const ShareModal: React.FC<ShareModalProps> = ({ track, isOpen, onClose }
           )}
         </div>
 
-        {/* Petunjuk Koneksi */}
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-          <Wifi className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-          <span>Pastikan kedua perangkat berada di Wi-Fi atau Hotspot yang sama</span>
+        {/* Petunjuk Koneksi & Firewall */}
+        <div className="flex items-start gap-1.5 text-[11px] text-zinc-400 text-left bg-zinc-900/50 p-2.5 rounded-xl border border-zinc-850 w-full">
+          <Wifi className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p>Pastikan kedua perangkat berada di Wi-Fi yang sama atau sambungkan ke Hotspot HP.</p>
+            <p className="text-[10px] text-zinc-500">
+              Jika di Desktop gagal tersambung, izinkan port 3001 di Windows Defender Firewall.
+            </p>
+          </div>
         </div>
       </div>
     </div>
   );
 };
+
