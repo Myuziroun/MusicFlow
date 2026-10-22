@@ -1,4 +1,4 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin, CapacitorHttp } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { db } from '../db/database';
 import { FileStorageService } from './fileStorage';
@@ -296,6 +296,27 @@ export class ShareService {
    */
   static async fetchTrackInfo(ip: string, port: number, token: string): Promise<ShareTrackInfo> {
     const url = `http://${ip}:${port}/api/share/info?token=${encodeURIComponent(token)}`;
+
+    // 1. Pada native Android, prioritaskan native CapacitorHttp untuk melewati restriksi WebView
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await CapacitorHttp.get({
+          url,
+          connectTimeout: 8000,
+          readTimeout: 8000
+        });
+        if (res.status === 200 && res.data) {
+          return typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+        } else if (res.status === 404) {
+          throw new Error('Sesi berbagi tidak ditemukan atau telah kedaluwarsa');
+        }
+      } catch (err: any) {
+        console.warn('Native CapacitorHttp.get gagal, mencoba fetch standar:', err);
+        if (err.message && err.message.includes('kedaluwarsa')) throw err;
+      }
+    }
+
+    // 2. Fallback fetch standar (browser / desktop)
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(`Gagal menghubungi perangkat pengirim pada ${ip}:${port} (Status: ${res.status})`);
@@ -314,45 +335,79 @@ export class ShareService {
     onProgress: (percent: number, receivedBytes: number, totalBytes: number) => void
   ): Promise<Track> {
     const downloadUrl = `http://${ip}:${port}/api/share/download?token=${encodeURIComponent(token)}`;
-    const response = await fetch(downloadUrl);
 
-    if (!response.ok || !response.body) {
-      throw new Error(`Gagal mengunduh audio dari pengirim (Status: ${response.status})`);
+    let uint8: Uint8Array | null = null;
+    let trackFileSize = meta.fileSize || 0;
+
+    // A. Percobaan 1: Streaming fetch standar untuk update progress byte-by-byte
+    try {
+      const response = await fetch(downloadUrl);
+      if (response.ok && response.body) {
+        const contentLength = response.headers.get('content-length');
+        const totalBytes = contentLength ? parseInt(contentLength, 10) : meta.fileSize || 0;
+        trackFileSize = totalBytes;
+
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let receivedBytes = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          if (value) {
+            chunks.push(value);
+            receivedBytes += value.length;
+
+            if (totalBytes > 0) {
+              const percent = Math.min(100, Math.round((receivedBytes * 100) / totalBytes));
+              onProgress(percent, receivedBytes, totalBytes);
+            } else {
+              onProgress(50, receivedBytes, 0);
+            }
+          }
+        }
+
+        uint8 = new Uint8Array(receivedBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+          uint8.set(chunk, offset);
+          offset += chunk.length;
+        }
+      }
+    } catch (fetchErr) {
+      console.warn('Streaming fetch gagal, mencoba native fallback:', fetchErr);
     }
 
-    const contentLength = response.headers.get('content-length');
-    const totalBytes = contentLength ? parseInt(contentLength, 10) : meta.fileSize || 0;
+    // B. Percobaan 2: Native CapacitorHttp fallback jika streaming fetch gagal pada Android
+    if (!uint8 && Capacitor.isNativePlatform()) {
+      onProgress(25, 0, meta.fileSize || 0);
+      const res = await CapacitorHttp.get({
+        url: downloadUrl,
+        responseType: 'blob',
+        connectTimeout: 15000,
+        readTimeout: 60000
+      });
 
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let receivedBytes = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      if (value) {
-        chunks.push(value);
-        receivedBytes += value.length;
-
-        if (totalBytes > 0) {
-          const percent = Math.min(100, Math.round((receivedBytes * 100) / totalBytes));
-          onProgress(percent, receivedBytes, totalBytes);
-        } else {
-          onProgress(50, receivedBytes, 0);
+      if (res.status === 200 && res.data) {
+        onProgress(75, meta.fileSize || 0, meta.fileSize || 0);
+        const base64Data: string = res.data;
+        const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+        const binaryString = atob(cleanBase64);
+        const len = binaryString.length;
+        uint8 = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          uint8[i] = binaryString.charCodeAt(i);
         }
+        trackFileSize = len;
       }
     }
 
-    onProgress(100, receivedBytes, totalBytes || receivedBytes);
-
-    // Gabungkan chunks ke dalam Uint8Array terpadu
-    const uint8 = new Uint8Array(receivedBytes);
-    let offset = 0;
-    for (const chunk of chunks) {
-      uint8.set(chunk, offset);
-      offset += chunk.length;
+    if (!uint8 || uint8.length === 0) {
+      throw new Error(`Gagal mengunduh audio dari pengirim pada ${ip}:${port}`);
     }
+
+    onProgress(100, uint8.length, trackFileSize || uint8.length);
 
     const audioBlob = new Blob([uint8.buffer as ArrayBuffer], { type: 'audio/mpeg' });
     const trackId = `track_${Date.now()}`;
@@ -377,7 +432,7 @@ export class ShareService {
       audioBlob,
       filePath: nativeFilePath,
       source: 'local',
-      fileSize: receivedBytes,
+      fileSize: trackFileSize || audioBlob.size,
       dateAdded: Date.now()
     };
 

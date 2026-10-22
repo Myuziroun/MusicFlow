@@ -406,6 +406,13 @@ function getLocalIp() {
 
 const activeShareSessions = new Map();
 
+// Logging untuk memantau request ShareFlow lokal
+app.use('/api/share', (req, res, next) => {
+  const remote = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+  console.log(`[ShareFlow P2P] ${req.method} ${req.originalUrl || req.url} from ${remote}`);
+  next();
+});
+
 /**
  * Mendapatkan IP lokal pengirim beserta seluruh antarmuka yang tersedia
  */

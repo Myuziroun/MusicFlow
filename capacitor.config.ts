@@ -5,7 +5,11 @@ const config: CapacitorConfig = {
   appName: 'MusicFlow',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'http',
+    cleartext: true
+  },
+  android: {
+    allowMixedContent: true
   },
   plugins: {
     CapacitorHttp: {
