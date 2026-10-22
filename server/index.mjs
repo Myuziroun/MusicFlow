@@ -3,6 +3,7 @@ import cors from 'cors';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +27,8 @@ try {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Path executable Python & FFmpeg
 const PYTHON_PATH = 'C:\\Users\\Lenovo\\AppData\\Local\\Python\\bin\\python.exe';
@@ -329,6 +331,194 @@ app.get('/api/files/:filename', (req, res) => {
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Accept-Ranges', 'bytes');
   res.sendFile(filePath);
+});
+
+// ==========================================
+// SHAREFLOW: P2P LOCAL MUSIC SHARING ENGINE
+// ==========================================
+
+function getLocalIp() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        if (
+          iface.address.startsWith('192.168.') ||
+          iface.address.startsWith('10.') ||
+          iface.address.startsWith('172.')
+        ) {
+          return iface.address;
+        }
+      }
+    }
+  }
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
+const activeShareSessions = new Map();
+
+/**
+ * Mendapatkan IP lokal pengirim
+ */
+app.get('/api/share/ip', (req, res) => {
+  res.json({
+    ip: getLocalIp(),
+    port: Number(PORT)
+  });
+});
+
+/**
+ * Pendaftaran sesi share oleh pengirim (Desktop)
+ */
+app.post('/api/share/register', (req, res) => {
+  const { token, track, base64Audio } = req.body;
+  if (!token || !track) {
+    return res.status(400).json({ error: 'Token dan metadata lagu wajib disertakan' });
+  }
+
+  let audioBuffer = null;
+  if (base64Audio) {
+    try {
+      audioBuffer = Buffer.from(base64Audio, 'base64');
+    } catch (e) {
+      console.warn('Gagal decode base64Audio:', e.message);
+    }
+  }
+
+  let filePath = null;
+  if (track.fileName) {
+    const candidate = path.join(DOWNLOADS_DIR, track.fileName);
+    if (fs.existsSync(candidate)) {
+      filePath = candidate;
+    }
+  }
+
+  activeShareSessions.set(token, {
+    token,
+    track,
+    filePath,
+    audioBuffer,
+    status: 'waiting',
+    progress: 0,
+    createdAt: Date.now()
+  });
+
+  res.json({
+    success: true,
+    token,
+    ip: getLocalIp(),
+    port: Number(PORT)
+  });
+});
+
+/**
+ * Penerima mengambil metadata lagu sebelum mengunduh
+ */
+app.get('/api/share/info', (req, res) => {
+  const token = req.query.token;
+  if (!token || !activeShareSessions.has(token)) {
+    return res.status(404).json({ error: 'Sesi berbagi tidak ditemukan atau telah kadaluarsa' });
+  }
+
+  const session = activeShareSessions.get(token);
+  const track = session.track;
+  let fileSize = session.audioBuffer ? session.audioBuffer.length : (track.fileSize || 0);
+
+  if (session.filePath && fs.existsSync(session.filePath)) {
+    try {
+      fileSize = fs.statSync(session.filePath).size;
+    } catch {}
+  }
+
+  res.json({
+    title: track.title,
+    artist: track.artist,
+    album: track.album || '',
+    duration: track.duration || 0,
+    fileSize,
+    coverUrl: track.coverUrl || '',
+    token
+  });
+});
+
+/**
+ * Penerima mengunduh binary audio stream lagu
+ */
+app.get('/api/share/download', (req, res) => {
+  const token = req.query.token;
+  if (!token || !activeShareSessions.has(token)) {
+    return res.status(404).json({ error: 'Sesi berbagi tidak ditemukan' });
+  }
+
+  const session = activeShareSessions.get(token);
+  session.status = 'transferring';
+
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(session.track.title || 'song')}.mp3"`);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (session.audioBuffer) {
+    res.setHeader('Content-Length', session.audioBuffer.length);
+    res.end(session.audioBuffer, () => {
+      session.status = 'completed';
+      session.progress = 100;
+    });
+    return;
+  }
+
+  if (session.filePath && fs.existsSync(session.filePath)) {
+    const stat = fs.statSync(session.filePath);
+    res.setHeader('Content-Length', stat.size);
+    const readStream = fs.createReadStream(session.filePath);
+    let bytesSent = 0;
+    readStream.on('data', (chunk) => {
+      bytesSent += chunk.length;
+      if (stat.size > 0) {
+        session.progress = Math.min(100, Math.round((bytesSent * 100) / stat.size));
+      }
+    });
+    readStream.on('end', () => {
+      session.status = 'completed';
+      session.progress = 100;
+    });
+    readStream.pipe(res);
+    return;
+  }
+
+  res.status(404).json({ error: 'Audio data tidak tersedia di server' });
+});
+
+/**
+ * Status transfer untuk dipoll oleh pengirim
+ */
+app.get('/api/share/status', (req, res) => {
+  const token = req.query.token;
+  if (!token || !activeShareSessions.has(token)) {
+    return res.json({ status: 'idle', progress: 0 });
+  }
+  const session = activeShareSessions.get(token);
+  res.json({
+    status: session.status,
+    progress: session.progress
+  });
+});
+
+/**
+ * Pembatalan atau penutupan sesi share
+ */
+app.post('/api/share/cancel', (req, res) => {
+  const { token } = req.body;
+  if (token) {
+    activeShareSessions.delete(token);
+  }
+  res.json({ success: true });
 });
 
 // Jalankan server

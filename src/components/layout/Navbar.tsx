@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Radio, CheckCircle2, XCircle } from 'lucide-react';
+import { Search, Plus, Radio, CheckCircle2, XCircle, QrCode } from 'lucide-react';
 import { useLibrary } from '../../context/LibraryContext';
 import { YouTubeService } from '../../services/youtubeService';
 
 interface NavbarProps {
   onOpenImport: () => void;
+  onOpenReceive: () => void;
   activeTab: string;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, activeTab }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, onOpenReceive, activeTab }) => {
   const { searchQuery, setSearchQuery } = useLibrary();
   const [engineOnline, setEngineOnline] = useState<boolean>(false);
 
@@ -93,6 +94,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, activeTab }) => {
             </div>
           </div>
         </div>
+
+        {/* Tombol Terima Lagu (ShareFlow) */}
+        <button
+          onClick={onOpenReceive}
+          title="Terima lagu via Barcode atau Token (ShareFlow P2P)"
+          className="flex items-center gap-1.5 px-3 py-1.5 md:px-3.5 md:py-2 rounded-full bg-zinc-900 hover:bg-zinc-800 text-white border border-zinc-700 font-semibold text-xs md:text-sm transition-all active:scale-95 shadow-sm"
+        >
+          <QrCode className="w-3.5 h-3.5 text-white" />
+          <span className="hidden sm:inline">Terima Lagu</span>
+          <span className="sm:hidden">Terima</span>
+        </button>
 
         {/* Tombol Tambah Musik Lokal */}
         <button

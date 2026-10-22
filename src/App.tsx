@@ -13,12 +13,14 @@ import { PlaylistList } from './components/library/PlaylistList';
 import { PlaylistDetail } from './components/library/PlaylistDetail';
 import { CreatePlaylistModal } from './components/library/CreatePlaylistModal';
 import { ImportLocalModal } from './components/library/ImportLocalModal';
+import { ReceiveModal } from './components/share/ReceiveModal';
 import { YouTubeSearch } from './components/downloader/YouTubeSearch';
 
 const MainLayout: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('tracks');
   const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState<boolean>(false);
+  const [isReceiveOpen, setIsReceiveOpen] = useState<boolean>(false);
 
   // Cek apakah tab aktif adalah detail playlist tertentu (misal: playlist-favorites)
   const isPlaylistDetail = activeTab.startsWith('playlist-');
@@ -32,7 +34,11 @@ const MainLayout: React.FC = () => {
       {/* Upper Area: Sidebar + Main Content (Desktop & Mobile) */}
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
         {/* Sidebar Nav (Desktop) */}
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onOpenReceive={() => setIsReceiveOpen(true)}
+        />
 
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col min-w-0 h-full relative">
@@ -40,6 +46,7 @@ const MainLayout: React.FC = () => {
           <Navbar
             activeTab={activeTab}
             onOpenImport={() => setIsImportOpen(true)}
+            onOpenReceive={() => setIsReceiveOpen(true)}
           />
 
           {/* Scrollable View Content */}
@@ -93,6 +100,12 @@ const MainLayout: React.FC = () => {
         isOpen={isCreatePlaylistOpen}
         onClose={() => setIsCreatePlaylistOpen(false)}
         onCreated={(newId) => setActiveTab(`playlist-${newId}`)}
+      />
+
+      {/* ShareFlow Receive Modal */}
+      <ReceiveModal
+        isOpen={isReceiveOpen}
+        onClose={() => setIsReceiveOpen(false)}
       />
     </div>
   );

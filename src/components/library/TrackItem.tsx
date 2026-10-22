@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Play, Pause, MoreVertical, Trash2, Plus, Music, Youtube, HardDrive, Edit3 } from 'lucide-react';
+import { Play, Pause, MoreVertical, Trash2, Plus, Music, Youtube, HardDrive, Edit3, QrCode } from 'lucide-react';
 import type { Track } from '../../types/music';
 import { usePlayer } from '../../context/PlayerContext';
 import { useLibrary } from '../../context/LibraryContext';
 import { formatDuration } from '../../utils/formatters';
 import { EditTrackModal } from './EditTrackModal';
+import { ShareModal } from '../share/ShareModal';
 
 interface TrackItemProps {
   track: Track;
@@ -19,6 +20,7 @@ export const TrackItem: React.FC<TrackItemProps> = ({ track, index, allTracks })
   const [showMenu, setShowMenu] = useState<boolean>(false);
   const [showPlaylistSubmenu, setShowPlaylistSubmenu] = useState<boolean>(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
 
   const isCurrent = currentTrack?.id === track.id;
 
@@ -171,6 +173,16 @@ export const TrackItem: React.FC<TrackItemProps> = ({ track, index, allTracks })
 
               <button
                 onClick={() => {
+                  setIsShareModalOpen(true);
+                  setShowMenu(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-zinc-900 flex items-center gap-2 text-zinc-200"
+              >
+                <QrCode className="w-3.5 h-3.5 text-white" /> Bagikan Lagu (ShareFlow)
+              </button>
+
+              <button
+                onClick={() => {
                   setIsEditModalOpen(true);
                   setShowMenu(false);
                 }}
@@ -198,6 +210,13 @@ export const TrackItem: React.FC<TrackItemProps> = ({ track, index, allTracks })
         track={track}
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
+      />
+
+      {/* ShareFlow P2P Modal */}
+      <ShareModal
+        track={track}
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
       />
     </div>
   );

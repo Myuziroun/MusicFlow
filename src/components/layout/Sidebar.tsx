@@ -1,13 +1,14 @@
 import React from 'react';
-import { Music, ListMusic, Download, Radio } from 'lucide-react';
+import { Music, ListMusic, Download, Radio, QrCode } from 'lucide-react';
 import { useLibrary } from '../../context/LibraryContext';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  onOpenReceive?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onOpenReceive }) => {
   const { tracks, playlists, downloadJobs } = useLibrary();
 
   const activeDownloadsCount = downloadJobs.filter(
@@ -83,6 +84,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           );
         })}
       </nav>
+
+      {/* ShareFlow Quick Receiver Action */}
+      {onOpenReceive && (
+        <button
+          onClick={onOpenReceive}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 mt-3 rounded-xl border border-zinc-800/80 bg-zinc-950 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-medium transition-all"
+        >
+          <QrCode className="w-4 h-4 text-white" />
+          <span>Terima Lagu (ShareFlow)</span>
+        </button>
+      )}
 
       {/* Quick Playlists Section */}
       <div className="mt-8 flex-1 overflow-y-auto pr-1">
