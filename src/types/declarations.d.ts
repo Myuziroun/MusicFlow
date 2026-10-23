@@ -14,3 +14,18 @@ declare module '@breezystack/lamejs' {
     flush(): ArrayBuffer | Int8Array | Uint8Array;
   }
 }
+
+type NativePlaybackAction = 'play' | 'pause' | 'toggle' | 'next' | 'previous' | 'seek';
+
+interface NativePlaybackCommand {
+  action: NativePlaybackAction;
+  position?: number;
+}
+
+interface Window {
+  /**
+   * Handler yang dipanggil PlaybackServicePlugin dari Android melalui
+   * evaluateJavascript saat pengguna menekan kontrol di notifikasi.
+   */
+  __musicflowNativeCommand?: (command: NativePlaybackCommand) => void;
+}

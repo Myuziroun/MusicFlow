@@ -1,15 +1,30 @@
+import { Capacitor } from '@capacitor/core';
 import type { Track } from '../types/music';
+
+const IS_ANDROID = Capacitor.getPlatform() === 'android';
 
 /**
  * Service untuk menghubungkan audio player dengan sistem kontrol media OS
  * (Lockscreen Android, Notification bar, serta kontrol tombol keyboard PC).
+ *
+ * Di Android, MediaSession ditangani secara native oleh PlaybackService.
+ * Web MediaSession sengaja dinonaktifkan di sana agar tidak ada dua sesi
+ * media yang berebut metadata dan tombol kontrol.
  */
 export class MediaSessionService {
+  private static get isAvailable(): boolean {
+    return (
+      typeof navigator !== 'undefined' &&
+      !IS_ANDROID &&
+      'mediaSession' in navigator
+    );
+  }
+
   /**
    * Perbarui metadata lagu di Lockscreen & Notification
    */
   static updateMetadata(track: Track | null): void {
-    if (!('mediaSession' in navigator) || !track) {
+    if (!MediaSessionService.isAvailable || !track) {
       return;
     }
 
@@ -34,7 +49,7 @@ export class MediaSessionService {
    * Perbarui status playback (playing / paused)
    */
   static updatePlaybackState(isPlaying: boolean): void {
-    if ('mediaSession' in navigator) {
+    if (MediaSessionService.isAvailable) {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }
   }
@@ -43,7 +58,7 @@ export class MediaSessionService {
    * Perbarui posisi seekbar pada media notification
    */
   static updatePositionState(duration: number, currentTime: number): void {
-    if (!('mediaSession' in navigator) || !duration || isNaN(duration)) return;
+    if (!MediaSessionService.isAvailable || !duration || isNaN(duration)) return;
     try {
       if (typeof navigator.mediaSession.setPositionState === 'function') {
         navigator.mediaSession.setPositionState({
@@ -67,7 +82,7 @@ export class MediaSessionService {
     onPrevious: () => void;
     onSeek?: (seekTime: number) => void;
   }): void {
-    if (!('mediaSession' in navigator)) return;
+    if (!MediaSessionService.isAvailable) return;
 
     try {
       navigator.mediaSession.setActionHandler('play', handlers.onPlay);

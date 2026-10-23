@@ -3,6 +3,7 @@ import type { Track, RepeatMode } from '../types/music';
 import { db } from '../db/database';
 import { FileStorageService } from '../services/fileStorage';
 import { MediaSessionService } from '../services/mediaSession';
+import { NativePlayback } from '../services/playbackService';
 
 export interface PlayerProgressContextType {
   currentTime: number;
@@ -72,6 +73,41 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
 
+  /**
+   * Sinkronkan state pemutar ke foreground service Android.
+   * Dipanggil hanya saat state berubah, bukan setiap timeupdate, agar IPC
+   * tetap ringan dan tidak menambah beban renderer.
+   */
+  const syncNativeState = useCallback(
+    (overrides?: { isPlaying?: boolean; position?: number }) => {
+      const audio = audioRef.current;
+      const track = currentTrackRef.current;
+      if (!audio || !track || !NativePlayback.isAvailable()) return;
+
+      const audioDuration = Number.isFinite(audio.duration) ? audio.duration : track.duration;
+      NativePlayback.updateState({
+        isPlaying: overrides?.isPlaying ?? !audio.paused,
+        title: track.title,
+        artist: track.artist,
+        album: track.album || '',
+        duration: audioDuration > 0 ? audioDuration : 0,
+        position: overrides?.position ?? audio.currentTime
+      });
+    },
+    []
+  );
+
+  // Kirim posisi 0 saat track berganti agar progres di notifikasi tidak
+  // mewarisi posisi lagu sebelumnya.
+  const lastNativeTrackIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentTrack) return;
+
+    const trackChanged = lastNativeTrackIdRef.current !== currentTrack.id;
+    lastNativeTrackIdRef.current = currentTrack.id;
+    syncNativeState(trackChanged ? { position: 0 } : undefined);
+  }, [currentTrack, isPlaying, duration, syncNativeState]);
+
   // Inisialisasi Audio element
   useEffect(() => {
     const audio = new Audio();
@@ -137,6 +173,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (repeatMode === 'one' && audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(console.warn);
+      syncNativeState({ isPlaying: true, position: 0 });
       return;
     }
 
@@ -149,6 +186,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (repeatMode === 'all') {
         nextIndex = 0;
       } else {
+        audioRef.current?.pause();
         setIsPlaying(false);
         return;
       }
@@ -160,7 +198,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCurrentTrack(nextTrk);
       loadAndPlay(nextTrk);
     }
-  }, [queue, queueIndex, repeatMode, isShuffle]);
+  }, [queue, queueIndex, repeatMode, isShuffle, syncNativeState]);
 
   // Fungsi navigasi Previous Track
   const previousTrack = useCallback(() => {
@@ -168,6 +206,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     if (audioRef.current && audioRef.current.currentTime > 3) {
       audioRef.current.currentTime = 0;
+      setCurrentTime(0);
+      syncNativeState({ position: 0 });
       return;
     }
 
@@ -182,7 +222,66 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCurrentTrack(prevTrk);
       loadAndPlay(prevTrk);
     }
-  }, [queue, queueIndex]);
+  }, [queue, queueIndex, syncNativeState]);
+
+  // Ref menjaga handler native selalu memakai versi terbaru dari fungsi
+  // navigasi tanpa perlu melepas/memasang listener setiap render.
+  const nextTrackRef = useRef(nextTrack);
+  const previousTrackRef = useRef(previousTrack);
+
+  useEffect(() => {
+    nextTrackRef.current = nextTrack;
+  }, [nextTrack]);
+
+  useEffect(() => {
+    previousTrackRef.current = previousTrack;
+  }, [previousTrack]);
+
+  // Terima perintah dari notifikasi/layar kunci Android melalui plugin native.
+  useEffect(() => {
+    if (!NativePlayback.isAvailable()) return;
+
+    window.__musicflowNativeCommand = (command) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      switch (command.action) {
+        case 'play':
+          audio.play().catch(console.warn);
+          break;
+        case 'pause':
+          audio.pause();
+          break;
+        case 'toggle':
+          if (audio.paused) {
+            audio.play().catch(console.warn);
+          } else {
+            audio.pause();
+          }
+          break;
+        case 'next':
+          nextTrackRef.current();
+          break;
+        case 'previous':
+          previousTrackRef.current();
+          break;
+        case 'seek':
+          if (typeof command.position === 'number' && Number.isFinite(command.position)) {
+            const target = Math.max(0, command.position);
+            audio.currentTime = target;
+            setCurrentTime(target);
+            syncNativeState({ position: target });
+          }
+          break;
+        default:
+          break;
+      }
+    };
+
+    return () => {
+      delete window.__musicflowNativeCommand;
+    };
+  }, [syncNativeState]);
 
   // Pasang event audio 'ended'
   useEffect(() => {
@@ -240,6 +339,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       console.warn('Autoplay diblokir oleh browser:', err);
     });
 
+    // Saat track yang sama diputar ulang, state React tidak berubah sehingga
+    // efek sinkronisasi tidak berjalan. Reset posisi notifikasi secara eksplisit.
+    if (currentTrackRef.current?.id === track.id) {
+      syncNativeState({ isPlaying: true, position: 0 });
+    }
+
     MediaSessionService.updateMetadata(track);
   };
 
@@ -284,6 +389,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (audioRef.current) {
       audioRef.current.currentTime = seconds;
       setCurrentTime(seconds);
+      syncNativeState({ position: seconds });
     }
   };
 

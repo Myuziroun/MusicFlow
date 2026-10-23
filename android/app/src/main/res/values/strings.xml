@@ -4,4 +4,11 @@
     <string name="title_activity_main">MusicFlow</string>
     <string name="package_name">com.musiclistener.musicflow</string>
     <string name="custom_url_scheme">com.musiclistener.musicflow</string>
+    <string name="playback_channel_name">Pemutaran Musik</string>
+    <string name="playback_channel_description">Kontrol pemutaran MusicFlow di notifikasi dan layar kunci</string>
+    <string name="playback_notification_title">MusicFlow</string>
+    <string name="playback_previous">Sebelumnya</string>
+    <string name="playback_next">Berikutnya</string>
+    <string name="playback_play">Putar</string>
+    <string name="playback_pause">Jeda</string>
 </resources>
