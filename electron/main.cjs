@@ -2,6 +2,15 @@ const { app, BrowserWindow, nativeTheme } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 
+// Optimasi Memori & Kestabilan Audio Chromium (Tanpa mengorbankan performa GPU/60fps)
+// 1. Matikan Spare Renderer (tab cadangan bawaan Chrome yang tidak terpakai di desktop)
+app.commandLine.appendSwitch('disable-features', 'SpareRendererForSitePerProcess');
+// 2. Cegah pelambatan timer audio saat aplikasi diminimalkan / berjalan di latar belakang
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// 3. Batas heap moderat (256 MB) agar Garbage Collector V8 lebih sigap membersihkan memori
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+
 // Pastikan tema sistem selalu Dark
 if (nativeTheme) {
   nativeTheme.themeSource = 'dark';
@@ -85,7 +94,16 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // Memperbolehkan streaming audio lokal tanpa blokir CORS
+      webSecurity: false, // Memperbolehkan streaming audio lokal tanpa blokir CORS
+      spellcheck: false, // Mematikan dictionary Chromium (menghemat ~15-20 MB RAM)
+      backgroundThrottling: false // Menjaga pemutaran audio di latar belakang tetap stabil
+    }
+  });
+
+  // Pembersihan cache sesaat saat jendela diminimalkan agar konsumsi RAM turun
+  mainWindow.on('minimize', () => {
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.session.clearCache().catch(() => {});
     }
   });
 
