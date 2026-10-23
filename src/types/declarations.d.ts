@@ -22,10 +22,30 @@ interface NativePlaybackCommand {
   position?: number;
 }
 
+interface DesktopWindowState {
+  isMaximized: boolean;
+  isNotchMode: boolean;
+}
+
+interface MusicFlowDesktopAPI {
+  minimize: () => void;
+  toggleMaximize: () => void;
+  close: () => void;
+  enterNotchMode: () => Promise<DesktopWindowState>;
+  exitNotchMode: (options?: { maximize?: boolean }) => Promise<DesktopWindowState>;
+  getWindowState: () => Promise<DesktopWindowState>;
+  onWindowStateChange: (listener: (state: DesktopWindowState) => void) => () => void;
+}
+
 interface Window {
   /**
    * Handler yang dipanggil PlaybackServicePlugin dari Android melalui
    * evaluateJavascript saat pengguna menekan kontrol di notifikasi.
    */
   __musicflowNativeCommand?: (command: NativePlaybackCommand) => void;
+
+  /**
+   * Bridge kontrol jendela khusus Electron. Tidak tersedia di browser biasa.
+   */
+  musicflowDesktop?: MusicFlowDesktopAPI;
 }

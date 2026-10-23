@@ -37,9 +37,10 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
    - Pengoperasian mandiri dengan deteksi otomatis engine lokal pada desktop serta fallback engine publik untuk perangkat mobile.
 
 4. Desain Antarmuka:
-   - Tema monokrom hitam dan putih minimalis.
-   - Integrasi title bar khusus pada desktop yang menyatu dengan kontrol jendela sistem operasi.
+   - Tema monokrom hitam dan putih minimalis tanpa aksen warna sistem.
+   - Title bar desktop dengan notch tengah dan kontrol jendela kustom: minimize, mode notch, maximize/restore, dan close.
    - Close-to-tray pada desktop: tombol close menyembunyikan jendela ke system tray tanpa menghentikan audio.
+   - Mode notch bebas: mini-player selalu di atas, dapat digeser, dan menyediakan kontrol putar/jeda, restore, maximize, serta close.
 
 5. Pemutaran Latar Belakang Android:
    - Foreground service dengan MediaSession native agar audio tetap berjalan saat layar mati atau aplikasi berpindah ke latar belakang.
@@ -116,12 +117,17 @@ Perintah ini akan menjalankan server pengembangan Vite bersamaan dengan Electron
 
 ### Perilaku Jendela Desktop
 
-- Tombol close menyembunyikan jendela ke system tray. Audio tetap berjalan dan local engine tidak dihentikan.
+- Title bar desktop menggunakan kontrol kustom. Tombol minimize memakai minimize taskbar normal, sedangkan maximize memakai maximize Windows normal, bukan true fullscreen.
+- Tombol notch di tengah title bar mengubah jendela menjadi mini-player berukuran 380x64 yang selalu di atas, dapat digeser, dan tidak ditampilkan di taskbar.
+- Mode notch menyediakan kontrol putar/jeda, restore ke ukuran dan keadaan jendela sebelumnya, maximize, dan close. Audio tetap berjalan karena player dan audio tidak di-unmount.
+- Tombol close selalu menyembunyikan jendela ke system tray, baik dari mode normal maupun mode notch. Audio dan local engine tetap berjalan.
+- Klik ikon tray atau pilih menu `Buka MusicFlow` untuk keluar dari mode notch dan menampilkan kembali jendela pada ukuran serta keadaan sebelumnya.
 - Tombol minimize tetap meminimalkan jendela ke taskbar seperti biasa.
-- Klik ikon tray atau pilih menu `Buka MusicFlow` untuk menampilkan kembali jendela.
 - Pilih menu `Keluar` pada tray untuk menghentikan aplikasi dan local engine sepenuhnya.
 - Membuka shortcut aplikasi saat jendela tersembunyi akan memunculkan instance yang sama, bukan membuat instance baru.
-- Tombol media keyboard (play/pause, next, previous) ditangani melalui MediaSession Chromium dan tetap aktif saat jendela disembunyikan.
+- Tombol media keyboard (play/pause, next, previous) ditangani melalui MediaSession Chromium dan tetap aktif saat jendela disembunyikan maupun dalam mode notch.
+- Kontrol jendela kustom menggantikan overlay native. Konsekuensinya, hover Snap Layouts Windows 11 pada tombol maximize tidak tersedia, tetapi maximize dan restore normal tetap berfungsi.
+- Aksen warna border jendela Windows dinonaktifkan agar tampilan antarmuka tetap monokrom.
 
 ---
 
@@ -177,17 +183,19 @@ Jika ingin menjalankan aplikasi sebagai antarmuka web murni:
 ```text
 ├── android/                  # Proyek native Android (Capacitor)
 ├── electron/                 # Konfigurasi dan entry point Electron Desktop
-│   └── main.cjs              # Lifecycle window, title bar, dan spawn engine lokal
+│   ├── main.cjs              # Lifecycle window, tray, mode notch, dan spawn engine lokal
+│   └── preload.cjs           # Bridge IPC kontrol jendela ke renderer
 ├── server/                   # Local Engine backend (Express, yt-dlp, FFmpeg)
 │   └── index.mjs             # Endpoint API pencarian, pengunduhan, dan konversi
 ├── src/
 │   ├── components/
 │   │   ├── downloader/       # Komponen pencarian YouTube dan antrean unduhan
-│   │   ├── layout/           # Komponen Navbar, Sidebar, BottomNav, dan TitleBar
+│   │   ├── layout/           # Navbar, Sidebar, BottomNav, TitleBar, dan NotchMode
 │   │   ├── library/          # Pengelolaan daftar lagu, playlist, dan modal impor
 │   │   └── player/           # Bar pemutar audio, pemutar layar penuh, dan modal antrean
 │   ├── context/
-│   │   ├── LibraryContext.tsx# Manajemen state koleksi lagu dan basis data IndexedDB
+│   │   ├── DesktopWindowContext.tsx # Sinkronisasi state maximize dan mode notch
+│   │   ├── LibraryContext.tsx # Manajemen state koleksi lagu dan basis data IndexedDB
 │   │   └── PlayerContext.tsx # Logika pemutaran audio dan sinkronisasi MediaSession
 │   ├── db/
 │   │   └── database.ts       # Skema dan inisialisasi IndexedDB (Dexie)

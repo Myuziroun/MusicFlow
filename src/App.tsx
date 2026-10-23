@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { PlayerProvider } from './context/PlayerContext';
 import { LibraryProvider } from './context/LibraryContext';
+import { DesktopWindowProvider, useDesktopWindow } from './context/DesktopWindowContext';
 import { Navbar } from './components/layout/Navbar';
 import { TitleBar } from './components/layout/TitleBar';
+import { NotchMode } from './components/layout/NotchMode';
 import { Sidebar } from './components/layout/Sidebar';
 import { BottomNav } from './components/layout/BottomNav';
 import { PlayerBar } from './components/player/PlayerBar';
@@ -17,6 +19,7 @@ import { ReceiveModal } from './components/share/ReceiveModal';
 import { YouTubeSearch } from './components/downloader/YouTubeSearch';
 
 const MainLayout: React.FC = () => {
+  const { isNotchMode } = useDesktopWindow();
   const [activeTab, setActiveTab] = useState<string>('tracks');
   const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
   const [isCreatePlaylistOpen, setIsCreatePlaylistOpen] = useState<boolean>(false);
@@ -27,7 +30,13 @@ const MainLayout: React.FC = () => {
   const selectedPlaylistId = isPlaylistDetail ? activeTab.replace('playlist-', '') : null;
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-black text-white font-sans">
+    <div
+      className={
+        isNotchMode
+          ? 'hidden'
+          : 'flex flex-col h-screen w-screen overflow-hidden bg-black text-white font-sans'
+      }
+    >
       {/* Desktop Window Title Bar (Electron) */}
       <TitleBar />
 
@@ -77,17 +86,24 @@ const MainLayout: React.FC = () => {
         </div>
       </div>
 
-      {/* Persistent Bottom Audio Player Bar - FULL WIDTH (Spanning 100% Screen Width) */}
-      <PlayerBar />
+      {/* Komponen pemutar tidak dirender saat notch agar subscription progress
+          tidak memicu render terus-menerus di jendela kecil. Audio tetap hidup
+          karena berada di PlayerProvider. */}
+      {!isNotchMode && (
+        <>
+          {/* Persistent Bottom Audio Player Bar - FULL WIDTH (Spanning 100% Screen Width) */}
+          <PlayerBar />
+
+          {/* Fullscreen Player Modal (Mobile Optimized) */}
+          <FullscreenPlayer />
+
+          {/* Queue Drawer Modal */}
+          <QueueModal />
+        </>
+      )}
 
       {/* Mobile Bottom Navigation Bar */}
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
-
-      {/* Fullscreen Player Modal (Mobile Optimized) */}
-      <FullscreenPlayer />
-
-      {/* Queue Drawer Modal */}
-      <QueueModal />
 
       {/* Import Local Audio Modal */}
       <ImportLocalModal
@@ -114,9 +130,12 @@ const MainLayout: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <PlayerProvider>
-      <LibraryProvider>
-        <MainLayout />
-      </LibraryProvider>
+      <DesktopWindowProvider>
+        <LibraryProvider>
+          <MainLayout />
+        </LibraryProvider>
+        <NotchMode />
+      </DesktopWindowProvider>
     </PlayerProvider>
   );
 };

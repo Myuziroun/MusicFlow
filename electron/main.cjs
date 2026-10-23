@@ -1,4 +1,13 @@
-const { app, BrowserWindow, nativeTheme, Tray, Menu, nativeImage } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  nativeTheme,
+  Tray,
+  Menu,
+  nativeImage,
+  ipcMain,
+  screen
+} = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 
@@ -24,6 +33,16 @@ let serverProcess = null;
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let notchMode = false;
+let isEnteringNotch = false;
+let notchEntryTimer = null;
+let notchEntryListener = null;
+let savedWindowState = null;
+let lastNotchBounds = null;
+
+const NOTCH_WIDTH = 380;
+const NOTCH_HEIGHT = 64;
+const NOTCH_TOP_MARGIN = 12;
 
 // Mulai backend local engine (yt-dlp + ffmpeg server) di background
 function startLocalServer() {
@@ -81,14 +100,229 @@ function stopLocalServer() {
   }
 }
 
+function getWindowState() {
+  return {
+    isMaximized: Boolean(
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      mainWindow.isMaximized()
+    ),
+    isNotchMode: notchMode
+  };
+}
+
+function sendWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send('window:state-changed', getWindowState());
+}
+
+function isMainWindowSender(event) {
+  return Boolean(
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    event.sender === mainWindow.webContents
+  );
+}
+
+function clampBoundsToDisplay(bounds) {
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  const maxX = workArea.x + workArea.width - width;
+  const maxY = workArea.y + workArea.height - height;
+
+  return {
+    x: Math.min(Math.max(bounds.x, workArea.x), maxX),
+    y: Math.min(Math.max(bounds.y, workArea.y), maxY),
+    width,
+    height
+  };
+}
+
+function getNotchBounds() {
+  const referenceBounds =
+    lastNotchBounds ||
+    savedWindowState?.bounds ||
+    (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null);
+
+  const reference = referenceBounds || {
+    x: 0,
+    y: 0,
+    width: NOTCH_WIDTH,
+    height: NOTCH_HEIGHT
+  };
+
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(reference.x + reference.width / 2),
+    y: Math.round(reference.y + reference.height / 2)
+  });
+  const { workArea } = display;
+  const width = Math.min(NOTCH_WIDTH, workArea.width);
+  const height = Math.min(NOTCH_HEIGHT, workArea.height);
+  const maxX = workArea.x + workArea.width - width;
+  const maxY = workArea.y + workArea.height - height;
+
+  if (lastNotchBounds) {
+    return {
+      x: Math.min(Math.max(lastNotchBounds.x, workArea.x), maxX),
+      y: Math.min(Math.max(lastNotchBounds.y, workArea.y), maxY),
+      width,
+      height
+    };
+  }
+
+  return {
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.min(workArea.y + NOTCH_TOP_MARGIN, maxY),
+    width,
+    height
+  };
+}
+
+function clearNotchEntryTransition() {
+  isEnteringNotch = false;
+
+  if (notchEntryTimer) {
+    clearTimeout(notchEntryTimer);
+    notchEntryTimer = null;
+  }
+
+  if (notchEntryListener && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.removeListener('unmaximize', notchEntryListener);
+  }
+  notchEntryListener = null;
+}
+
+function cancelPendingNotchEntry() {
+  if (!isEnteringNotch) return;
+  clearNotchEntryTransition();
+  savedWindowState = null;
+}
+
+function applyNotchMode() {
+  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) return;
+
+  mainWindow.setMinimumSize(0, 0);
+  mainWindow.setBounds(getNotchBounds());
+  mainWindow.setResizable(false);
+  mainWindow.setMaximizable(false);
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.show();
+  mainWindow.focus();
+
+  // Windows dapat mengabaikan topmost saat animasi unmaximize masih berjalan.
+  // Terapkan ulang setelah transisi agar mini-player benar-benar berada di atas.
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && notchMode) {
+      mainWindow.setAlwaysOnTop(true);
+    }
+  }, 150);
+
+  sendWindowState();
+}
+
+function enterNotchMode() {
+  if (!mainWindow || mainWindow.isDestroyed() || notchMode || isEnteringNotch) {
+    return getWindowState();
+  }
+
+  const wasMaximized = mainWindow.isMaximized();
+  const bounds = wasMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+  const [minWidth, minHeight] = mainWindow.getMinimumSize();
+
+  savedWindowState = {
+    bounds: clampBoundsToDisplay(bounds),
+    wasMaximized,
+    minWidth,
+    minHeight
+  };
+
+  if (wasMaximized) {
+    // NOTE: setBounds diabaikan Windows selama window masih dalam proses
+    // unmaximize. Tunggu event unmaximize, dengan fallback timer bila event
+    // tidak tersedia, baru terapkan ukuran notch. Topmost dipasang lebih awal
+    // agar tidak hilang selama animasi restore dari keadaan maximize.
+    mainWindow.setAlwaysOnTop(true);
+    isEnteringNotch = true;
+    const finishEntry = () => {
+      if (!isEnteringNotch) return;
+      clearNotchEntryTransition();
+      notchMode = true;
+      applyNotchMode();
+    };
+
+    notchEntryListener = finishEntry;
+    mainWindow.once('unmaximize', finishEntry);
+    notchEntryTimer = setTimeout(finishEntry, 300);
+    mainWindow.unmaximize();
+  } else {
+    notchMode = true;
+    applyNotchMode();
+  }
+
+  return getWindowState();
+}
+
+function exitNotchMode(maximize = false) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return getWindowState();
+  }
+
+  if (isEnteringNotch) {
+    cancelPendingNotchEntry();
+    return getWindowState();
+  }
+
+  if (!notchMode || !savedWindowState) {
+    return getWindowState();
+  }
+
+  clearNotchEntryTransition();
+  lastNotchBounds = mainWindow.getBounds();
+
+  const saved = savedWindowState;
+  savedWindowState = null;
+  notchMode = false;
+
+  mainWindow.setAlwaysOnTop(false);
+  mainWindow.setSkipTaskbar(false);
+  mainWindow.setResizable(true);
+  mainWindow.setMaximizable(true);
+  mainWindow.setMinimumSize(saved.minWidth, saved.minHeight);
+  mainWindow.setBounds(clampBoundsToDisplay(saved.bounds));
+  mainWindow.show();
+
+  if (maximize || saved.wasMaximized) {
+    mainWindow.maximize();
+  }
+
+  mainWindow.focus();
+  sendWindowState();
+
+  return getWindowState();
+}
+
 function showMainWindow() {
   if (!app.isReady()) return;
 
+  cancelPendingNotchEntry();
+
   if (!mainWindow || mainWindow.isDestroyed()) {
+    notchMode = false;
+    savedWindowState = null;
     createWindow();
   }
 
   if (!mainWindow) return;
+
+  if (notchMode) {
+    exitNotchMode(false);
+    return;
+  }
 
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
@@ -139,14 +373,11 @@ function createWindow() {
     title: 'MusicFlow - Music Player',
     icon: path.join(__dirname, '../build/icon.ico'),
     backgroundColor: '#000000',
+    accentColor: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#000000',
-      symbolColor: '#ffffff',
-      height: 36
-    },
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false, // Memperbolehkan streaming audio lokal tanpa blokir CORS
@@ -157,6 +388,7 @@ function createWindow() {
 
   // Pembersihan cache sesaat saat jendela diminimalkan agar konsumsi RAM turun
   mainWindow.on('minimize', () => {
+    cancelPendingNotchEntry();
     if (mainWindow && mainWindow.webContents) {
       mainWindow.webContents.session.clearCache().catch(() => {});
     }
@@ -165,11 +397,20 @@ function createWindow() {
   // Close-to-tray: audio tetap berjalan karena renderer tidak dimusnahkan.
   // Jika tray gagal dibuat, close tetap menutup aplikasi seperti biasa.
   mainWindow.on('close', (event) => {
+    cancelPendingNotchEntry();
     if (!isQuitting && tray) {
       event.preventDefault();
       mainWindow.hide();
     }
   });
+
+  mainWindow.on('maximize', () => {
+    cancelPendingNotchEntry();
+    sendWindowState();
+  });
+  mainWindow.on('unmaximize', sendWindowState);
+  mainWindow.on('restore', sendWindowState);
+  mainWindow.webContents.on('did-finish-load', sendWindowState);
 
   const isDev = process.argv.includes('--dev');
   if (isDev) {
@@ -189,7 +430,58 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    clearNotchEntryTransition();
     mainWindow = null;
+    notchMode = false;
+    savedWindowState = null;
+  });
+}
+
+function registerWindowIpc() {
+  ipcMain.on('window:minimize', (event) => {
+    if (!isMainWindowSender(event) || !mainWindow) return;
+    mainWindow.minimize();
+  });
+
+  ipcMain.on('window:toggle-maximize', (event) => {
+    if (!isMainWindowSender(event) || !mainWindow) return;
+
+    if (isEnteringNotch) {
+      cancelPendingNotchEntry();
+    }
+
+    if (notchMode) {
+      exitNotchMode(true);
+      return;
+    }
+
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+
+  ipcMain.on('window:close', (event) => {
+    if (!isMainWindowSender(event) || !mainWindow) return;
+    mainWindow.close();
+  });
+
+  ipcMain.handle('window:get-state', (event) => {
+    if (!isMainWindowSender(event)) {
+      return { isMaximized: false, isNotchMode: false };
+    }
+    return getWindowState();
+  });
+
+  ipcMain.handle('window:enter-notch', (event) => {
+    if (!isMainWindowSender(event)) return getWindowState();
+    return enterNotchMode();
+  });
+
+  ipcMain.handle('window:exit-notch', (event, options) => {
+    if (!isMainWindowSender(event)) return getWindowState();
+    return exitNotchMode(Boolean(options?.maximize));
   });
 }
 
@@ -209,6 +501,7 @@ if (!hasSingleInstanceLock) {
       app.setAppUserModelId('com.musicflow.desktop');
     }
 
+    registerWindowIpc();
     startLocalServer();
     createWindow();
     createTray();
