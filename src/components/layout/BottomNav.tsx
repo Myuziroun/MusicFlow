@@ -26,7 +26,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
   ];
 
   return (
-    <nav className="md:hidden border-t border-zinc-850 bg-black/95 backdrop-blur-lg px-2 py-1.5 flex justify-around items-center z-30 select-none pb-safe">
+    <nav className="md:hidden border-t border-zinc-850 bg-black px-2 py-1.5 flex justify-around items-center z-30 select-none pb-safe">
       {items.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id || (item.id === 'playlists' && activeTab.startsWith('playlist-'));

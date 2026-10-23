@@ -43,8 +43,10 @@ export const PlayerBar: React.FC = () => {
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  // NOTE: backdrop-blur sengaja dihilangkan karena latar bg-black/95 nyaris opak, sehingga
+  // hasil visual identik namun menghemat alokasi surface GPU saat repaint progres lagu.
   return (
-    <div className="w-full flex-shrink-0 border-t border-zinc-800 bg-black/95 backdrop-blur-xl px-4 md:px-6 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4 z-20 select-none shadow-2xl">
+    <div className="w-full flex-shrink-0 border-t border-zinc-800 bg-black px-4 md:px-6 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-4 z-20 select-none shadow-2xl">
       {/* Mini Progress Bar on Top for Mobile */}
       <div
         className="w-full h-1 bg-zinc-800 md:hidden rounded-full overflow-hidden cursor-pointer"

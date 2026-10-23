@@ -36,7 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenImport, onOpenReceive, act
   }, []);
 
   return (
-    <header className="h-16 border-b border-dark-border bg-dark-surface/80 backdrop-blur-md px-4 md:px-6 flex items-center justify-between sticky top-0 z-20">
+    <header className="h-16 border-b border-dark-border bg-dark-surface px-4 md:px-6 flex items-center justify-between sticky top-0 z-20">
       {/* Brand info (Mobile) */}
       <div className="flex items-center gap-2 md:hidden">
         <div className="w-8 h-8 rounded-lg bg-white/10 text-white flex items-center justify-center font-bold">
