@@ -39,6 +39,7 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
 4. Desain Antarmuka:
    - Tema monokrom hitam dan putih minimalis.
    - Integrasi title bar khusus pada desktop yang menyatu dengan kontrol jendela sistem operasi.
+   - Close-to-tray pada desktop: tombol close menyembunyikan jendela ke system tray tanpa menghentikan audio.
 
 5. Pemutaran Latar Belakang Android:
    - Foreground service dengan MediaSession native agar audio tetap berjalan saat layar mati atau aplikasi berpindah ke latar belakang.
@@ -112,6 +113,15 @@ npm run electron:dev
 ```
 
 Perintah ini akan menjalankan server pengembangan Vite bersamaan dengan Electron window secara bersamaan.
+
+### Perilaku Jendela Desktop
+
+- Tombol close menyembunyikan jendela ke system tray. Audio tetap berjalan dan local engine tidak dihentikan.
+- Tombol minimize tetap meminimalkan jendela ke taskbar seperti biasa.
+- Klik ikon tray atau pilih menu `Buka MusicFlow` untuk menampilkan kembali jendela.
+- Pilih menu `Keluar` pada tray untuk menghentikan aplikasi dan local engine sepenuhnya.
+- Membuka shortcut aplikasi saat jendela tersembunyi akan memunculkan instance yang sama, bukan membuat instance baru.
+- Tombol media keyboard (play/pause, next, previous) ditangani melalui MediaSession Chromium dan tetap aktif saat jendela disembunyikan.
 
 ---
 

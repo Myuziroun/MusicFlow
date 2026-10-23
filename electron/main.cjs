@@ -1,4 +1,4 @@
-const { app, BrowserWindow, nativeTheme } = require('electron');
+const { app, BrowserWindow, nativeTheme, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 
@@ -22,6 +22,8 @@ if (nativeTheme) {
 
 let serverProcess = null;
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
 
 // Mulai backend local engine (yt-dlp + ffmpeg server) di background
 function startLocalServer() {
@@ -79,6 +81,55 @@ function stopLocalServer() {
   }
 }
 
+function showMainWindow() {
+  if (!app.isReady()) return;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+  }
+
+  if (!mainWindow) return;
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return tray;
+
+  const iconPath = path.join(app.getAppPath(), 'build', 'icon.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    // Tanpa ikon tray, close-to-tray akan membuat jendela tidak bisa
+    // dipulihkan. Biarkan perilaku close normal jika ikon gagal dimuat.
+    console.warn('Ikon tray tidak dapat dimuat:', iconPath);
+    return null;
+  }
+
+  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  tray.setToolTip('MusicFlow');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Buka MusicFlow', click: showMainWindow },
+      {
+        label: 'Keluar',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+  tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+
+  return tray;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -111,6 +162,15 @@ function createWindow() {
     }
   });
 
+  // Close-to-tray: audio tetap berjalan karena renderer tidak dimusnahkan.
+  // Jika tray gagal dibuat, close tetap menutup aplikasi seperti biasa.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   const isDev = process.argv.includes('--dev');
   if (isDev) {
     // Saat development: muat dari Vite dev server
@@ -133,18 +193,39 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
-  startLocalServer();
-  createWindow();
+// Cegah instance kedua membuat server lokal baru saat aplikasi sudah berjalan
+// di tray. Membuka shortcut kembali akan memunculkan jendela yang sama.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    showMainWindow();
   });
-});
+
+  app.whenReady().then(() => {
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('com.musicflow.desktop');
+    }
+
+    startLocalServer();
+    createWindow();
+    createTray();
+
+    app.on('activate', () => {
+      showMainWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
+  // Saat close-to-tray aktif, jendela hanya disembunyikan. Jika jendela
+  // benar-benar hancur, biarkan tray dan local engine tetap hidup.
+  if (!isQuitting && tray) {
+    return;
+  }
+
   stopLocalServer();
   if (process.platform !== 'darwin') {
     app.quit();
@@ -152,5 +233,18 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   stopLocalServer();
+});
+
+// Saat Windows logout/shutdown, jangan tahan jendela di tray.
+app.on('session-end', () => {
+  isQuitting = true;
+});
+
+app.on('will-quit', () => {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
 });
