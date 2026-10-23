@@ -43,7 +43,8 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
 5. Pemutaran Latar Belakang Android:
    - Foreground service dengan MediaSession native agar audio tetap berjalan saat layar mati atau aplikasi berpindah ke latar belakang.
    - Kontrol putar, jeda, sebelumnya, berikutnya, dan seek melalui notifikasi serta layar kunci.
-   - Metadata judul, artis, dan album tersinkron dengan pemutar di WebView.
+   - Metadata judul, artis, album, dan cover art tersinkron dengan pemutar di WebView.
+   - Cover diambil dari gambar tertanam pada file audio, data URL cover lokal, atau URL thumbnail sebagai fallback.
 
 ---
 
@@ -157,6 +158,7 @@ Jika ingin menjalankan aplikasi sebagai antarmuka web murni:
 5. Catatan pemutaran latar belakang:
    - Pada beberapa perangkat, sistem dapat menghentikan foreground service karena kebijakan optimasi baterai. Buka pengaturan aplikasi MusicFlow, lalu pilih opsi tanpa batasan atau nonaktifkan optimasi baterai untuk aplikasi ini.
    - Jika kontrol pemutaran tidak muncul di notifikasi pada Android 13 ke atas, pastikan izin notifikasi untuk MusicFlow aktif.
+   - Cover yang tertanam di file MP3 tetap tampil tanpa koneksi internet. Cover yang hanya tersedia sebagai URL thumbnail memerlukan koneksi saat pertama kali dimuat.
 
 ---
 

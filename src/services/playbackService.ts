@@ -11,10 +11,24 @@ export interface NativePlaybackState {
   album: string;
   duration: number;
   position: number;
+  coverKey: string;
+}
+
+/**
+ * Sumber cover art untuk notifikasi Android.
+ * `coverData` hanya dipakai untuk blob URL lama yang tidak dapat diakses
+ * langsung oleh proses native.
+ */
+export interface NativeCoverSource {
+  key: string;
+  coverUrl?: string;
+  filePath?: string;
+  coverData?: string;
 }
 
 interface PlaybackServicePlugin {
   updateState(options: NativePlaybackState): Promise<void>;
+  setCoverSource(options: NativeCoverSource): Promise<void>;
 }
 
 const PlaybackService = registerPlugin<PlaybackServicePlugin>('PlaybackService');
@@ -38,6 +52,18 @@ export const NativePlayback = {
       // Jangan ganggu pemutaran jika service gagal dimulai (misalnya izin
       // foreground service ditolak oleh kebijakan baterai perangkat).
       console.warn('Gagal menyinkronkan state ke playback service Android:', err);
+    }
+  },
+
+  async setCoverSource(source: NativeCoverSource): Promise<void> {
+    if (!IS_ANDROID) return;
+
+    try {
+      await PlaybackService.setCoverSource(source);
+    } catch (err) {
+      // Cover bersifat pelengkap; kegagalan memuat cover tidak boleh
+      // menghentikan pemutaran atau menghilangkan kontrol notifikasi.
+      console.warn('Gagal mengirim sumber cover ke playback service Android:', err);
     }
   }
 };

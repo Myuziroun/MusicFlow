@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import { FileStorageService } from '../services/fileStorage';
 import { MediaSessionService } from '../services/mediaSession';
 import { NativePlayback } from '../services/playbackService';
+import { blobUrlToCoverDataUrl } from '../utils/imageUtils';
 
 export interface PlayerProgressContextType {
   currentTime: number;
@@ -91,7 +92,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         artist: track.artist,
         album: track.album || '',
         duration: audioDuration > 0 ? audioDuration : 0,
-        position: overrides?.position ?? audio.currentTime
+        position: overrides?.position ?? audio.currentTime,
+        coverKey: track.id
       });
     },
     []
@@ -107,6 +109,44 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     lastNativeTrackIdRef.current = currentTrack.id;
     syncNativeState(trackChanged ? { position: 0 } : undefined);
   }, [currentTrack, isPlaying, duration, syncNativeState]);
+
+  // Kirim sumber cover sekali per track. Service native mengekstrak cover
+  // tertanam dari file atau memuat URL, sehingga payload bridge tidak ikut
+  // terkirim pada setiap play, pause, atau seek.
+  useEffect(() => {
+    const track = currentTrack;
+    if (!track || !NativePlayback.isAvailable()) return;
+
+    let cancelled = false;
+
+    const sendCoverSource = async () => {
+      let coverUrl = track.coverUrl;
+      let coverData: string | undefined;
+
+      // Blob URL hanya hidup di WebView. Konversi ke data URL agar bisa
+      // dibaca service native; ini juga menangani track lama yang belum
+      // dimigrasikan ke data URL.
+      if (coverUrl?.startsWith('blob:')) {
+        coverData = await blobUrlToCoverDataUrl(coverUrl);
+        coverUrl = undefined;
+      }
+
+      if (cancelled) return;
+
+      await NativePlayback.setCoverSource({
+        key: track.id,
+        coverUrl,
+        filePath: track.filePath,
+        coverData
+      });
+    };
+
+    void sendCoverSource();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrack?.id, currentTrack?.coverUrl, currentTrack?.filePath]);
 
   // Inisialisasi Audio element
   useEffect(() => {

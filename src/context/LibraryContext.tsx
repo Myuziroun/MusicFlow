@@ -4,6 +4,7 @@ import * as mm from 'music-metadata-browser';
 import { db } from '../db/database';
 import type { Track, Playlist, DownloadJob, YouTubeSearchResult } from '../types/music';
 import { generateId, cleanTrackMetadata, getAudioBlobDuration } from '../utils/formatters';
+import { blobToCoverDataUrl, blobUrlToCoverDataUrl } from '../utils/imageUtils';
 import { YouTubeService } from '../services/youtubeService';
 import { FileStorageService } from '../services/fileStorage';
 
@@ -121,6 +122,32 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
             updates.artist = meta.artist;
           }
 
+          // 4. Migrasi cover blob lama menjadi data URL. Blob URL tidak
+          // bertahan setelah restart, sehingga cover diekstrak ulang dari
+          // audio yang tersimpan di IndexedDB agar tetap bisa ditampilkan
+          // dan dikirim ke notifikasi Android.
+          if (t.coverUrl?.startsWith('blob:')) {
+            if (t.audioBlob) {
+              try {
+                const embeddedMetadata = await mm.parseBlob(t.audioBlob);
+                const embeddedCover = mm.selectCover(embeddedMetadata.common.picture);
+                if (embeddedCover) {
+                  const coverBlob = new Blob(
+                    [new Uint8Array(embeddedCover.data)],
+                    { type: embeddedCover.format }
+                  );
+                  const dataUrl = await blobToCoverDataUrl(coverBlob);
+                  if (dataUrl) updates.coverUrl = dataUrl;
+                }
+              } catch (coverErr) {
+                console.warn('Gagal memigrasikan cover track lama:', coverErr);
+              }
+            } else {
+              const dataUrl = await blobUrlToCoverDataUrl(t.coverUrl);
+              if (dataUrl) updates.coverUrl = dataUrl;
+            }
+          }
+
           if (Object.keys(updates).length > 0) {
             await db.tracks.update(t.id, updates);
           }
@@ -226,8 +253,14 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
           const cover = mm.selectCover(metadata.common.picture);
           if (cover) {
-            const blob = new Blob([new Uint8Array(cover.data)], { type: cover.format });
-            coverUrl = URL.createObjectURL(blob);
+            try {
+              const blob = new Blob([new Uint8Array(cover.data)], { type: cover.format });
+              // Simpan sebagai data URL agar cover tetap ada setelah aplikasi
+              // dibuka ulang dan dapat dibaca service notifikasi Android.
+              coverUrl = await blobToCoverDataUrl(blob);
+            } catch (coverErr) {
+              console.warn('Gagal mengonversi cover art ke data URL:', coverErr);
+            }
           }
         } catch (metaErr) {
           console.warn('Gagal membaca metadata ID3, menggunakan nama file:', metaErr);

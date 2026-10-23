@@ -8,6 +8,10 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -16,11 +20,19 @@ import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
+import android.util.Base64;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Foreground service yang menampilkan kontrol pemutaran di notifikasi dan
@@ -39,6 +51,8 @@ public class PlaybackService extends Service {
     public static final String ACTION_TOGGLE = "com.musiclistener.downloader.PLAYBACK_TOGGLE";
     public static final String ACTION_NEXT = "com.musiclistener.downloader.PLAYBACK_NEXT";
     public static final String ACTION_PREVIOUS = "com.musiclistener.downloader.PLAYBACK_PREVIOUS";
+    public static final String ACTION_SET_COVER_SOURCE =
+        "com.musiclistener.downloader.PLAYBACK_SET_COVER_SOURCE";
 
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_ARTIST = "artist";
@@ -46,9 +60,16 @@ public class PlaybackService extends Service {
     public static final String EXTRA_DURATION = "duration";
     public static final String EXTRA_POSITION = "position";
     public static final String EXTRA_IS_PLAYING = "isPlaying";
+    public static final String EXTRA_COVER_KEY = "coverKey";
+    public static final String EXTRA_COVER_URL = "coverUrl";
+    public static final String EXTRA_FILE_PATH = "filePath";
+    public static final String EXTRA_COVER_DATA = "coverData";
 
     private static final String CHANNEL_ID = "musicflow_playback";
     private static final int NOTIFICATION_ID = 2107;
+    private static final int MAX_COVER_SIZE_PX = 512;
+    private static final int MAX_COVER_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_COVER_DATA_CHARS = 3 * 1024 * 1024;
 
     public static volatile boolean isRunning = false;
 
@@ -62,12 +83,25 @@ public class PlaybackService extends Service {
     private long positionMs = 0;
     private boolean isPlaying = false;
 
+    private String coverKey = "";
+    private Bitmap coverBitmap;
+    private ExecutorService coverExecutor;
+    private Handler mainHandler;
+    private int coverLoadRequestId = 0;
+
+    private String deferredCoverKey = "";
+    private String deferredCoverUrl = "";
+    private String deferredCoverFilePath = "";
+    private String deferredCoverData = "";
+
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
         createWakeLock();
         createMediaSession();
+        coverExecutor = Executors.newSingleThreadExecutor();
+        mainHandler = new Handler(Looper.getMainLooper());
         isRunning = true;
     }
 
@@ -87,9 +121,19 @@ public class PlaybackService extends Service {
             applyStateFromIntent(intent);
         }
 
-        // Wajib dipanggil cepat setelah startForegroundService, termasuk saat
-        // service dihidupkan ulang oleh aksi notifikasi.
-        promoteToForeground();
+        if (ACTION_SET_COVER_SOURCE.equals(action) && intent != null) {
+            applyCoverSourceFromIntent(intent);
+        }
+
+        // Cover-only boleh datang sebelum updateState pertama. Jangan tampilkan
+        // notifikasi kosong; updateState berikutnya akan mempromosikan service.
+        boolean coverOnlyStart =
+            ACTION_SET_COVER_SOURCE.equals(action) && title.isEmpty();
+        if (!coverOnlyStart) {
+            // Wajib dipanggil cepat setelah startForegroundService, termasuk
+            // saat service dihidupkan ulang oleh aksi notifikasi.
+            promoteToForeground();
+        }
 
         if (ACTION_TOGGLE.equals(action)) {
             PlaybackServicePlugin.emitCommand("toggle", null);
@@ -126,6 +170,21 @@ public class PlaybackService extends Service {
         isRunning = false;
         isPlaying = false;
         releaseWakeLock();
+
+        coverLoadRequestId++;
+        coverKey = "";
+        coverBitmap = null;
+        clearDeferredCover();
+
+        if (coverExecutor != null) {
+            coverExecutor.shutdownNow();
+            coverExecutor = null;
+        }
+
+        if (mainHandler != null) {
+            mainHandler.removeCallbacksAndMessages(null);
+            mainHandler = null;
+        }
 
         if (mediaSession != null) {
             mediaSession.setActive(false);
@@ -215,21 +274,102 @@ public class PlaybackService extends Service {
         positionMs = Math.max(0, Math.round(intent.getDoubleExtra(EXTRA_POSITION, 0) * 1000));
         isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false);
 
+        String newCoverKey = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_KEY));
+        boolean coverChanged = !newCoverKey.equals(coverKey);
+        if (coverChanged) {
+            coverKey = newCoverKey;
+            coverBitmap = null;
+            coverLoadRequestId++;
+        }
+
         updateWakeLock(isPlaying);
         updateMediaSession();
+
+        if (coverChanged) {
+            String coverData = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_DATA));
+            String filePath = valueOrEmpty(intent.getStringExtra(EXTRA_FILE_PATH));
+            String coverUrl = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_URL));
+
+            // Sumber cover bisa tiba sebelum updateState pertama. Ambil
+            // deferred source jika key-nya cocok dengan track yang baru.
+            if (coverData.isEmpty()
+                && filePath.isEmpty()
+                && coverUrl.isEmpty()
+                && deferredCoverKey.equals(coverKey)) {
+                coverData = deferredCoverData;
+                filePath = deferredCoverFilePath;
+                coverUrl = deferredCoverUrl;
+            }
+
+            if (deferredCoverKey.equals(coverKey)) {
+                clearDeferredCover();
+            }
+
+            loadCoverAsync(coverKey, coverData, filePath, coverUrl);
+        }
+    }
+
+    private void applyCoverSourceFromIntent(Intent intent) {
+        String key = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_KEY));
+        if (key.isEmpty()) return;
+
+        String coverData = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_DATA));
+        String filePath = valueOrEmpty(intent.getStringExtra(EXTRA_FILE_PATH));
+        String coverUrl = valueOrEmpty(intent.getStringExtra(EXTRA_COVER_URL));
+
+        if (!key.equals(coverKey)) {
+            // Track belum diterima service. Simpan sampai updateState dengan
+            // key yang sama datang, agar urutan intent tidak menjadi masalah.
+            deferredCoverKey = key;
+            deferredCoverData = coverData;
+            deferredCoverFilePath = filePath;
+            deferredCoverUrl = coverUrl;
+            return;
+        }
+
+        clearDeferredCover();
+
+        if (coverData.isEmpty() && filePath.isEmpty() && coverUrl.isEmpty()) {
+            coverBitmap = null;
+            coverLoadRequestId++;
+            updateMediaSession();
+            return;
+        }
+
+        loadCoverAsync(key, coverData, filePath, coverUrl);
+    }
+
+    private void clearDeferredCover() {
+        deferredCoverKey = "";
+        deferredCoverData = "";
+        deferredCoverFilePath = "";
+        deferredCoverUrl = "";
     }
 
     private void updateMediaSession() {
         if (mediaSession == null) return;
 
         if (!title.isEmpty()) {
-            MediaMetadataCompat metadata = new MediaMetadataCompat.Builder()
+            MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, album)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
-                .build();
-            mediaSession.setMetadata(metadata);
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs);
+
+            if (coverBitmap != null) {
+                // Album art dan art dipasang bersamaan agar kompatibel dengan
+                // berbagai versi Android serta kontrol media OEM.
+                metadataBuilder.putBitmap(
+                    MediaMetadataCompat.METADATA_KEY_ALBUM_ART,
+                    coverBitmap
+                );
+                metadataBuilder.putBitmap(
+                    MediaMetadataCompat.METADATA_KEY_ART,
+                    coverBitmap
+                );
+            }
+
+            mediaSession.setMetadata(metadataBuilder.build());
         }
 
         long actions = PlaybackStateCompat.ACTION_PLAY
@@ -301,6 +441,10 @@ public class PlaybackService extends Service {
                 nextIntent
             );
 
+        // Tetap set null saat tidak ada cover agar large icon dari track
+        // sebelumnya tidak terbawa ke notifikasi track baru.
+        builder.setLargeIcon(coverBitmap);
+
         if (!album.isEmpty()) {
             builder.setSubText(album);
         }
@@ -313,6 +457,240 @@ public class PlaybackService extends Service {
         }
 
         return builder.build();
+    }
+
+    /**
+     * Memuat cover di luar main thread agar ekstraksi file atau unduhan HTTP
+     * tidak memblokir pembaruan MediaSession dan notifikasi.
+     */
+    private void loadCoverAsync(
+        String key,
+        String coverData,
+        String filePath,
+        String coverUrl
+    ) {
+        if (coverData.isEmpty() && filePath.isEmpty() && coverUrl.isEmpty()) {
+            return;
+        }
+
+        ExecutorService executor = coverExecutor;
+        Handler handler = mainHandler;
+        if (executor == null || executor.isShutdown() || handler == null) {
+            return;
+        }
+
+        final int requestId = ++coverLoadRequestId;
+
+        try {
+            executor.execute(() -> {
+                Bitmap bitmap = resolveCoverBitmap(coverData, filePath, coverUrl);
+                handler.post(() -> {
+                    if (requestId != coverLoadRequestId || !key.equals(coverKey)) {
+                        return;
+                    }
+
+                    if (bitmap == null) {
+                        Log.w(TAG, "Cover tidak dapat dimuat untuk track " + key);
+                        return;
+                    }
+
+                    coverBitmap = bitmap;
+                    updateMediaSession();
+                    promoteToForeground();
+                });
+            });
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal menjadwalkan pemuatan cover", e);
+        }
+    }
+
+    /**
+     * Urutan sumber cover: data dari WebView, cover tertanam di file audio,
+     * lalu URL gambar. File audio diprioritaskan agar cover tetap tersedia
+     * saat perangkat offline.
+     */
+    private Bitmap resolveCoverBitmap(
+        String coverData,
+        String filePath,
+        String coverUrl
+    ) {
+        if (!coverData.isEmpty()) {
+            Bitmap bitmap = decodeCoverData(coverData);
+            if (bitmap != null) return bitmap;
+        }
+
+        if (!filePath.isEmpty()) {
+            Bitmap bitmap = extractEmbeddedCover(filePath);
+            if (bitmap != null) return bitmap;
+        }
+
+        if (!coverUrl.isEmpty()) {
+            if (coverUrl.startsWith("data:")) {
+                return decodeCoverData(coverUrl);
+            }
+            if (coverUrl.startsWith("http://") || coverUrl.startsWith("https://")) {
+                return downloadCover(coverUrl);
+            }
+        }
+
+        return null;
+    }
+
+    private Bitmap decodeCoverData(String dataUrl) {
+        if (dataUrl.length() > MAX_COVER_DATA_CHARS) {
+            Log.w(TAG, "Data cover terlalu besar untuk diproses");
+            return null;
+        }
+
+        try {
+            String base64 = dataUrl;
+            if (dataUrl.startsWith("data:")) {
+                int commaIndex = dataUrl.indexOf(',');
+                if (commaIndex < 0) return null;
+                base64 = dataUrl.substring(commaIndex + 1);
+            }
+
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+            return decodeBitmap(bytes);
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal mendekode data cover", e);
+            return null;
+        }
+    }
+
+    private Bitmap extractEmbeddedCover(String filePath) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            Uri uri = Uri.parse(filePath);
+            String scheme = uri.getScheme();
+
+            if ("content".equals(scheme)) {
+                retriever.setDataSource(this, uri);
+            } else if ("file".equals(scheme)) {
+                String path = uri.getPath();
+                retriever.setDataSource(path != null ? path : filePath);
+            } else {
+                retriever.setDataSource(filePath);
+            }
+
+            byte[] picture = retriever.getEmbeddedPicture();
+            return picture != null ? decodeBitmap(picture) : null;
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal membaca cover tertanam dari file audio", e);
+            return null;
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception ignored) {
+                // Resource native sudah tidak dipakai; kegagalan release
+                // tidak memengaruhi pemutaran.
+            }
+        }
+    }
+
+    private Bitmap downloadCover(String coverUrl) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(coverUrl);
+            String protocol = url.getProtocol();
+            if (!"http".equals(protocol) && !"https".equals(protocol)) {
+                return null;
+            }
+
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "MusicFlow/1.0");
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                return null;
+            }
+
+            String contentType = connection.getContentType();
+            if (contentType != null && !contentType.startsWith("image/")) {
+                return null;
+            }
+
+            try (
+                InputStream input = connection.getInputStream();
+                ByteArrayOutputStream output = new ByteArrayOutputStream()
+            ) {
+                byte[] buffer = new byte[8192];
+                int total = 0;
+                int read;
+
+                while ((read = input.read(buffer)) != -1) {
+                    total += read;
+                    if (total > MAX_COVER_BYTES) {
+                        Log.w(TAG, "Cover dari URL melebihi batas ukuran");
+                        return null;
+                    }
+                    output.write(buffer, 0, read);
+                }
+
+                return decodeBitmap(output.toByteArray());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Gagal mengunduh cover dari URL", e);
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private Bitmap decodeBitmap(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return null;
+
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = calculateInSampleSize(
+            bounds.outWidth,
+            bounds.outHeight,
+            MAX_COVER_SIZE_PX
+        );
+
+        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+        if (bitmap == null) return null;
+
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        float scale = Math.min(
+            1f,
+            (float) MAX_COVER_SIZE_PX / Math.max(width, height)
+        );
+
+        if (scale >= 1f) {
+            return bitmap;
+        }
+
+        int targetWidth = Math.max(1, Math.round(width * scale));
+        int targetHeight = Math.max(1, Math.round(height * scale));
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
+
+        if (scaled != bitmap) {
+            bitmap.recycle();
+        }
+
+        return scaled;
+    }
+
+    private int calculateInSampleSize(int width, int height, int maxSize) {
+        int sampleSize = 1;
+        while (Math.max(width / sampleSize, height / sampleSize) > maxSize * 2) {
+            sampleSize *= 2;
+        }
+        return sampleSize;
     }
 
     private PendingIntent createContentIntent() {
