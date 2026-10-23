@@ -13,7 +13,7 @@ interface TrackItemProps {
   allTracks: Track[];
 }
 
-export const TrackItem: React.FC<TrackItemProps> = ({ track, index, allTracks }) => {
+export const TrackItem: React.FC<TrackItemProps> = React.memo(({ track, index, allTracks }) => {
   const { currentTrack, isPlaying, playTrack, togglePlay, addToQueue } = usePlayer();
   const { deleteTrack, playlists, addTrackToPlaylist } = useLibrary();
 
@@ -220,4 +220,4 @@ export const TrackItem: React.FC<TrackItemProps> = ({ track, index, allTracks })
       />
     </div>
   );
-};
+});

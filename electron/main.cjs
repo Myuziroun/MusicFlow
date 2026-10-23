@@ -10,6 +10,8 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // 3. Batas heap moderat (256 MB) agar Garbage Collector V8 lebih sigap membersihkan memori
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+// 4. Batasi buffer media cache Chromium agar tidak menimbun audio PCM di RAM
+app.commandLine.appendSwitch('media-cache-size', '16777216');
 
 // Pastikan tema sistem selalu Dark
 if (nativeTheme) {

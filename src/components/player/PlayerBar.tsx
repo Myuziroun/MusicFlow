@@ -13,15 +13,13 @@ import {
   Maximize2,
   Music
 } from 'lucide-react';
-import { usePlayer } from '../../context/PlayerContext';
+import { usePlayer, usePlayerProgress } from '../../context/PlayerContext';
 import { formatDuration } from '../../utils/formatters';
 
 export const PlayerBar: React.FC = () => {
   const {
     currentTrack,
     isPlaying,
-    currentTime,
-    duration,
     volume,
     isMuted,
     repeatMode,
@@ -37,6 +35,7 @@ export const PlayerBar: React.FC = () => {
     setIsPlayerModalOpen,
     setIsQueueModalOpen
   } = usePlayer();
+  const { currentTime, duration } = usePlayerProgress();
 
   if (!currentTrack) {
     return null;

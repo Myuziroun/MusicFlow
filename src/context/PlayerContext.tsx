@@ -1,13 +1,22 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Track, RepeatMode } from '../types/music';
 import { db } from '../db/database';
 import { FileStorageService } from '../services/fileStorage';
 import { MediaSessionService } from '../services/mediaSession';
 
-interface PlayerContextType {
+export interface PlayerProgressContextType {
+  currentTime: number;
+  duration: number;
+}
+
+export const PlayerProgressContext = createContext<PlayerProgressContextType>({
+  currentTime: 0,
+  duration: 0
+});
+
+export interface PlayerContextType {
   currentTrack: Track | null;
   isPlaying: boolean;
-  currentTime: number;
   duration: number;
   volume: number;
   isMuted: boolean;
@@ -66,7 +75,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Inisialisasi Audio element
   useEffect(() => {
     const audio = new Audio();
-    audio.preload = 'auto';
+    // Menggunakan metadata alih-alih auto agar Chromium tidak menelan seluruh audio ke RAM sekaligus
+    audio.preload = 'metadata';
     audioRef.current = audio;
 
     const onTimeUpdate = () => {
@@ -329,41 +339,63 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   };
 
+  // playerContextValue hanya berubah saat state utama pemutar berubah, BUKAN setiap tick detik (timeupdate)
+  const playerContextValue = useMemo<PlayerContextType>(() => ({
+    currentTrack,
+    isPlaying,
+    duration,
+    volume,
+    isMuted,
+    repeatMode,
+    isShuffle,
+    queue,
+    queueIndex,
+    isPlayerModalOpen,
+    isQueueModalOpen,
+    playTrack,
+    togglePlay,
+    pause,
+    resume,
+    nextTrack,
+    previousTrack,
+    seek,
+    setVolume,
+    toggleMute,
+    toggleRepeat,
+    toggleShuffle,
+    addToQueue,
+    removeFromQueue,
+    clearQueue,
+    updateTrackInPlayer,
+    setIsPlayerModalOpen,
+    setIsQueueModalOpen
+  }), [
+    currentTrack,
+    isPlaying,
+    duration,
+    volume,
+    isMuted,
+    repeatMode,
+    isShuffle,
+    queue,
+    queueIndex,
+    isPlayerModalOpen,
+    isQueueModalOpen,
+    nextTrack,
+    previousTrack
+  ]);
+
+  // progressContextValue khusus mengalirkan detik lagu (currentTime) yang berfrekuensi tinggi (4x per detik)
+  const progressContextValue = useMemo<PlayerProgressContextType>(() => ({
+    currentTime,
+    duration
+  }), [currentTime, duration]);
+
   return (
-    <PlayerContext.Provider
-      value={{
-        currentTrack,
-        isPlaying,
-        currentTime,
-        duration,
-        volume,
-        isMuted,
-        repeatMode,
-        isShuffle,
-        queue,
-        queueIndex,
-        isPlayerModalOpen,
-        isQueueModalOpen,
-        playTrack,
-        togglePlay,
-        pause,
-        resume,
-        nextTrack,
-        previousTrack,
-        seek,
-        setVolume,
-        toggleMute,
-        toggleRepeat,
-        toggleShuffle,
-        addToQueue,
-        removeFromQueue,
-        clearQueue,
-        updateTrackInPlayer,
-        setIsPlayerModalOpen,
-        setIsQueueModalOpen
-      }}
-    >
-      {children}
+    <PlayerContext.Provider value={playerContextValue}>
+      <PlayerProgressContext.Provider value={progressContextValue}>
+        {children}
+      </PlayerProgressContext.Provider>
     </PlayerContext.Provider>
   );
 };
@@ -374,4 +406,8 @@ export const usePlayer = (): PlayerContextType => {
     throw new Error('usePlayer must be used within a PlayerProvider');
   }
   return context;
+};
+
+export const usePlayerProgress = (): PlayerProgressContextType => {
+  return useContext(PlayerProgressContext);
 };

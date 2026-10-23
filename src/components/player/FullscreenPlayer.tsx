@@ -12,15 +12,13 @@ import {
   Music,
   Share2
 } from 'lucide-react';
-import { usePlayer } from '../../context/PlayerContext';
+import { usePlayer, usePlayerProgress } from '../../context/PlayerContext';
 import { formatDuration } from '../../utils/formatters';
 
 export const FullscreenPlayer: React.FC = () => {
   const {
     currentTrack,
     isPlaying,
-    currentTime,
-    duration,
     repeatMode,
     isShuffle,
     isPlayerModalOpen,
@@ -33,6 +31,7 @@ export const FullscreenPlayer: React.FC = () => {
     setIsPlayerModalOpen,
     setIsQueueModalOpen
   } = usePlayer();
+  const { currentTime, duration } = usePlayerProgress();
 
   if (!isPlayerModalOpen || !currentTrack) return null;
 
