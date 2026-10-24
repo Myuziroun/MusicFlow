@@ -22,9 +22,13 @@ interface NativePlaybackCommand {
   position?: number;
 }
 
+type NotchDockEdge = 'top' | 'left' | 'right';
+
 interface DesktopWindowState {
   isMaximized: boolean;
   isNotchMode: boolean;
+  notchDock?: NotchDockEdge;
+  isNotchCollapsed?: boolean;
 }
 
 interface MusicFlowDesktopAPI {
@@ -33,6 +37,7 @@ interface MusicFlowDesktopAPI {
   close: () => void;
   enterNotchMode: () => Promise<DesktopWindowState>;
   exitNotchMode: (options?: { maximize?: boolean }) => Promise<DesktopWindowState>;
+  setNotchCollapsed: (collapsed: boolean) => Promise<DesktopWindowState>;
   getWindowState: () => Promise<DesktopWindowState>;
   onWindowStateChange: (listener: (state: DesktopWindowState) => void) => () => void;
 }

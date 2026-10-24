@@ -36,11 +36,16 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
    - Penanaman cover art resolusi tinggi dan sanitasi metadata cerdas (pembersihan label video resmi, penyesuaian format artis dan judul lagu).
    - Pengoperasian mandiri dengan deteksi otomatis engine lokal pada desktop serta fallback engine publik untuk perangkat mobile.
 
-4. Desain Antarmuka:
+4. Desain Antarmuka dan Kontrol Desktop:
    - Tema monokrom hitam dan putih minimalis tanpa aksen warna sistem.
-   - Title bar desktop dengan notch tengah dan kontrol jendela kustom: minimize, mode notch, maximize/restore, dan close.
-   - Close-to-tray pada desktop: tombol close menyembunyikan jendela ke system tray tanpa menghentikan audio.
-   - Mode notch bebas: mini-player selalu di atas, dapat digeser, dan menyediakan kontrol putar/jeda, restore, maximize, serta close.
+   - Title bar desktop standar dengan kontrol di sudut kanan atas: tombol Mode Notch (sebelah kiri tombol minimize), Minimize, Maximize/Restore, dan Close.
+   - Fitur Close-to-Tray: penutupan jendela utama menyembunyikan aplikasi ke system tray tanpa memutus pemutaran audio.
+   - Mode Notch Mini-Player Adaptif:
+     - Snapping magnetik ke 3 tepi layar (atas, kiri, dan kanan; tepi bawah dikecualikan agar tidak bentrok dengan taskbar Windows).
+     - Adaptasi orientasi cerdas: orientasi mendatar (landscape) pada tepi atas layar, serta orientasi tegak (portrait) pada tepi kiri dan kanan layar.
+     - Auto-shrink otomatis: mengecil menjadi kapsul ringkas setelah 1.5 detik inaktivitas kursor mouse, dan berekspansi kembali secara instan ketika kursor masuk ke area pemain (`mouseenter`).
+     - Tampilan status ringkas saat menciut: menampilkan cover art mini, teks durasi berjalan, serta tombol putar/jeda.
+     - Pengecilan dimensi fisik BrowserWindow Electron secara riil saat menciut sehingga tidak ada hitbox transparan yang menghalangi klik pada aplikasi desktop lain.
 
 5. Pemutaran Latar Belakang Android:
    - Foreground service dengan MediaSession native agar audio tetap berjalan saat layar mati atau aplikasi berpindah ke latar belakang.

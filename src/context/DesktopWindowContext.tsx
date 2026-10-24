@@ -7,7 +7,9 @@ interface DesktopWindowContextValue extends DesktopWindowState {
 const DesktopWindowContext = createContext<DesktopWindowContextValue>({
   isDesktop: false,
   isMaximized: false,
-  isNotchMode: false
+  isNotchMode: false,
+  notchDock: 'top',
+  isNotchCollapsed: false
 });
 
 /**
@@ -18,7 +20,9 @@ export const DesktopWindowProvider: React.FC<{ children: React.ReactNode }> = ({
   const api = window.musicflowDesktop;
   const [state, setState] = useState<DesktopWindowState>({
     isMaximized: false,
-    isNotchMode: false
+    isNotchMode: false,
+    notchDock: 'top',
+    isNotchCollapsed: false
   });
 
   useEffect(() => {

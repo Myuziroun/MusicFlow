@@ -34,15 +34,28 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let notchMode = false;
+let notchDock = 'top';
+let isNotchCollapsed = false;
 let isEnteringNotch = false;
 let notchEntryTimer = null;
 let notchEntryListener = null;
 let savedWindowState = null;
 let lastNotchBounds = null;
 
-const NOTCH_WIDTH = 380;
-const NOTCH_HEIGHT = 64;
-const NOTCH_TOP_MARGIN = 12;
+const NOTCH_SIZES = {
+  top: {
+    expanded: { width: 380, height: 60 },
+    collapsed: { width: 190, height: 42 }
+  },
+  left: {
+    expanded: { width: 76, height: 260 },
+    collapsed: { width: 48, height: 140 }
+  },
+  right: {
+    expanded: { width: 76, height: 260 },
+    collapsed: { width: 48, height: 140 }
+  }
+};
 
 // Mulai backend local engine (yt-dlp + ffmpeg server) di background
 function startLocalServer() {
@@ -107,7 +120,9 @@ function getWindowState() {
       !mainWindow.isDestroyed() &&
       mainWindow.isMaximized()
     ),
-    isNotchMode: notchMode
+    isNotchMode: notchMode,
+    notchDock,
+    isNotchCollapsed
   };
 }
 
@@ -142,44 +157,100 @@ function clampBoundsToDisplay(bounds) {
   };
 }
 
-function getNotchBounds() {
-  const referenceBounds =
-    lastNotchBounds ||
-    savedWindowState?.bounds ||
-    (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null);
-
-  const reference = referenceBounds || {
-    x: 0,
-    y: 0,
-    width: NOTCH_WIDTH,
-    height: NOTCH_HEIGHT
-  };
-
-  const display = screen.getDisplayNearestPoint({
-    x: Math.round(reference.x + reference.width / 2),
-    y: Math.round(reference.y + reference.height / 2)
-  });
+function detectNearestDockEdge(bounds) {
+  const display = screen.getDisplayMatching(bounds) || screen.getPrimaryDisplay();
   const { workArea } = display;
-  const width = Math.min(NOTCH_WIDTH, workArea.width);
-  const height = Math.min(NOTCH_HEIGHT, workArea.height);
-  const maxX = workArea.x + workArea.width - width;
-  const maxY = workArea.y + workArea.height - height;
 
-  if (lastNotchBounds) {
-    return {
-      x: Math.min(Math.max(lastNotchBounds.x, workArea.x), maxX),
-      y: Math.min(Math.max(lastNotchBounds.y, workArea.y), maxY),
-      width,
-      height
-    };
+  // Snapping 3 tepi: Top, Left, Right (Bottom dikecualikan agar tidak bentrok dengan taskbar)
+  const distTop = Math.abs(bounds.y - workArea.y);
+  const distLeft = Math.abs(bounds.x - workArea.x);
+  const distRight = Math.abs((workArea.x + workArea.width) - (bounds.x + bounds.width));
+
+  if (distTop <= distLeft && distTop <= distRight) {
+    return 'top';
+  } else if (distLeft <= distRight) {
+    return 'left';
+  } else {
+    return 'right';
+  }
+}
+
+function calculateSnappedBounds(referenceBounds, dock = notchDock, collapsed = isNotchCollapsed) {
+  const display = screen.getDisplayMatching(referenceBounds) || screen.getPrimaryDisplay();
+  const { workArea } = display;
+  const size = NOTCH_SIZES[dock][collapsed ? 'collapsed' : 'expanded'];
+
+  let x = referenceBounds.x;
+  let y = referenceBounds.y;
+
+  if (dock === 'top') {
+    y = workArea.y;
+    const centerX = referenceBounds.x + referenceBounds.width / 2;
+    x = Math.round(centerX - size.width / 2);
+    x = Math.min(Math.max(x, workArea.x), workArea.x + workArea.width - size.width);
+  } else if (dock === 'left') {
+    x = workArea.x;
+    const centerY = referenceBounds.y + referenceBounds.height / 2;
+    y = Math.round(centerY - size.height / 2);
+    y = Math.min(Math.max(y, workArea.y), workArea.y + workArea.height - size.height);
+  } else if (dock === 'right') {
+    x = workArea.x + workArea.width - size.width;
+    const centerY = referenceBounds.y + referenceBounds.height / 2;
+    y = Math.round(centerY - size.height / 2);
+    y = Math.min(Math.max(y, workArea.y), workArea.y + workArea.height - size.height);
   }
 
   return {
-    x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.min(workArea.y + NOTCH_TOP_MARGIN, maxY),
-    width,
-    height
+    x,
+    y,
+    width: size.width,
+    height: size.height
   };
+}
+
+function getNotchBounds(dock = notchDock, collapsed = isNotchCollapsed) {
+  const referenceBounds =
+    lastNotchBounds ||
+    savedWindowState?.bounds ||
+    (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null) || {
+      x: 0,
+      y: 0,
+      width: NOTCH_SIZES.top.expanded.width,
+      height: NOTCH_SIZES.top.expanded.height
+    };
+
+  return calculateSnappedBounds(referenceBounds, dock, collapsed);
+}
+
+function handleWindowMoved() {
+  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) return;
+
+  const currentBounds = mainWindow.getBounds();
+  const nextDock = detectNearestDockEdge(currentBounds);
+  notchDock = nextDock;
+
+  const snapped = calculateSnappedBounds(currentBounds, notchDock, isNotchCollapsed);
+  lastNotchBounds = snapped;
+  mainWindow.setBounds(snapped);
+  sendWindowState();
+}
+
+function setNotchCollapsed(collapsed) {
+  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) {
+    return getWindowState();
+  }
+
+  const nextCollapsed = Boolean(collapsed);
+  if (isNotchCollapsed === nextCollapsed) {
+    return getWindowState();
+  }
+
+  isNotchCollapsed = nextCollapsed;
+  const targetBounds = getNotchBounds(notchDock, isNotchCollapsed);
+  lastNotchBounds = targetBounds;
+  mainWindow.setBounds(targetBounds);
+  sendWindowState();
+  return getWindowState();
 }
 
 function clearNotchEntryTransition() {
@@ -241,11 +312,9 @@ function enterNotchMode() {
     minHeight
   };
 
+  isNotchCollapsed = false;
+
   if (wasMaximized) {
-    // NOTE: setBounds diabaikan Windows selama window masih dalam proses
-    // unmaximize. Tunggu event unmaximize, dengan fallback timer bila event
-    // tidak tersedia, baru terapkan ukuran notch. Topmost dipasang lebih awal
-    // agar tidak hilang selama animasi restore dari keadaan maximize.
     mainWindow.setAlwaysOnTop(true);
     isEnteringNotch = true;
     const finishEntry = () => {
@@ -287,6 +356,7 @@ function exitNotchMode(maximize = false) {
   const saved = savedWindowState;
   savedWindowState = null;
   notchMode = false;
+  isNotchCollapsed = false;
 
   mainWindow.setAlwaysOnTop(false);
   mainWindow.setSkipTaskbar(false);
@@ -410,6 +480,7 @@ function createWindow() {
   });
   mainWindow.on('unmaximize', sendWindowState);
   mainWindow.on('restore', sendWindowState);
+  mainWindow.on('moved', handleWindowMoved);
   mainWindow.webContents.on('did-finish-load', sendWindowState);
 
   const isDev = process.argv.includes('--dev');
@@ -477,6 +548,11 @@ function registerWindowIpc() {
   ipcMain.handle('window:enter-notch', (event) => {
     if (!isMainWindowSender(event)) return getWindowState();
     return enterNotchMode();
+  });
+
+  ipcMain.handle('window:set-notch-collapsed', (event, collapsed) => {
+    if (!isMainWindowSender(event)) return getWindowState();
+    return setNotchCollapsed(collapsed);
   });
 
   ipcMain.handle('window:exit-notch', (event, options) => {
