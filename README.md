@@ -43,7 +43,8 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
    - Mode Notch Mini-Player Adaptif:
      - Snapping magnetik ke 3 tepi layar (atas, kiri, dan kanan; tepi bawah dikecualikan agar tidak bentrok dengan taskbar Windows).
      - Adaptasi orientasi cerdas: orientasi mendatar (landscape) pada tepi atas layar, serta orientasi tegak (portrait) pada tepi kiri dan kanan layar.
-     - Auto-shrink otomatis: mengecil menjadi kapsul ringkas setelah 1.5 detik inaktivitas kursor mouse, dan berekspansi kembali secara instan ketika kursor masuk ke area pemain (`mouseenter`).
+     - Auto-shrink otomatis: mengecil menjadi kapsul ringkas setelah 0,5 detik inaktivitas kursor mouse, dan berekspansi kembali secara instan ketika kursor masuk ke area pemain (`mouseenter`).
+     - Transisi ukuran jendela dianimasikan secara halus (easing `ease-out`), disertai efek fade dan scale lembut pada konten notch saat berganti antara tampilan penuh dan kapsul.
      - Tampilan status ringkas saat menciut: menampilkan cover art mini, teks durasi berjalan, serta tombol putar/jeda.
      - Pengecilan dimensi fisik BrowserWindow Electron secara riil saat menciut sehingga tidak ada hitbox transparan yang menghalangi klik pada aplikasi desktop lain.
 

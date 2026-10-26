@@ -7,6 +7,10 @@ import { formatDuration } from '../../utils/formatters';
 const notchControlClass =
   'w-6 h-6 shrink-0 rounded flex items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white focus:outline-none focus-visible:bg-zinc-800';
 
+// Delay auto-shrink singkat agar notch cepat mengecil saat kursor tidak aktif,
+// baik ketika kursor berada di dalam maupun di luar area notch.
+const COLLAPSE_DELAY_MS = 500;
+
 export const NotchMode: React.FC = () => {
   const { isNotchMode, notchDock = 'top', isNotchCollapsed = false } = useDesktopWindow();
   const {
@@ -30,7 +34,7 @@ export const NotchMode: React.FC = () => {
     wasNotchModeRef.current = isNotchMode;
   }, [isNotchMode, setIsPlayerModalOpen, setIsQueueModalOpen]);
 
-  // Manajemen auto-shrink setelah 1.5 detik inaktivitas kursor
+  // Manajemen auto-shrink setelah delay inaktivitas kursor (COLLAPSE_DELAY_MS)
   const clearCollapseTimer = () => {
     if (collapseTimerRef.current) {
       clearTimeout(collapseTimerRef.current);
@@ -42,7 +46,7 @@ export const NotchMode: React.FC = () => {
     clearCollapseTimer();
     collapseTimerRef.current = setTimeout(() => {
       void api?.setNotchCollapsed(true);
-    }, 1500);
+    }, COLLAPSE_DELAY_MS);
   };
 
   const handleMouseEnter = () => {
@@ -112,7 +116,10 @@ export const NotchMode: React.FC = () => {
         <div className="h-full w-full p-1 flex items-center justify-center">
           {isNotchCollapsed ? (
             /* Landscape - Collapsed Capsule (190 x 42) */
-            <div className="w-full h-full rounded-full border border-zinc-800 bg-zinc-950 flex items-center justify-between px-2 gap-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
+            <div
+              key="landscape-collapsed"
+              className="animate-notch-content-in w-full h-full rounded-full border border-zinc-800 bg-zinc-950 flex items-center justify-between px-2 gap-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.6)]"
+            >
               <div className="w-7 h-7 shrink-0 rounded-full border border-zinc-800 bg-zinc-900 overflow-hidden flex items-center justify-center">
                 {currentTrack?.coverUrl ? (
                   <img
@@ -150,7 +157,10 @@ export const NotchMode: React.FC = () => {
             </div>
           ) : (
             /* Landscape - Expanded Card (380 x 60) */
-            <div className="w-full h-full rounded-xl border border-zinc-800 bg-zinc-950 flex items-center gap-2 px-2.5 shadow-[0_6px_16px_rgba(0,0,0,0.6)]">
+            <div
+              key="landscape-expanded"
+              className="animate-notch-content-in w-full h-full rounded-xl border border-zinc-800 bg-zinc-950 flex items-center gap-2 px-2.5 shadow-[0_6px_16px_rgba(0,0,0,0.6)]"
+            >
               <div className="w-10 h-10 shrink-0 rounded-lg border border-zinc-800 bg-zinc-900 overflow-hidden flex items-center justify-center">
                 {currentTrack?.coverUrl ? (
                   <img
@@ -240,7 +250,10 @@ export const NotchMode: React.FC = () => {
         <div className="h-full w-full p-1 flex items-center justify-center">
           {isNotchCollapsed ? (
             /* Portrait - Collapsed Capsule (48 x 140) */
-            <div className="w-full h-full rounded-2xl border border-zinc-800 bg-zinc-950 flex flex-col items-center justify-between py-2 px-1 shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
+            <div
+              key="portrait-collapsed"
+              className="animate-notch-content-in w-full h-full rounded-2xl border border-zinc-800 bg-zinc-950 flex flex-col items-center justify-between py-2 px-1 shadow-[0_4px_12px_rgba(0,0,0,0.6)]"
+            >
               <div className="w-7 h-7 shrink-0 rounded-md border border-zinc-800 bg-zinc-900 overflow-hidden flex items-center justify-center">
                 {currentTrack?.coverUrl ? (
                   <img
@@ -280,7 +293,10 @@ export const NotchMode: React.FC = () => {
             </div>
           ) : (
             /* Portrait - Expanded Card (76 x 260) */
-            <div className="w-full h-full rounded-2xl border border-zinc-800 bg-zinc-950 flex flex-col items-center justify-between py-2 px-1 shadow-[0_6px_16px_rgba(0,0,0,0.6)] overflow-hidden">
+            <div
+              key="portrait-expanded"
+              className="animate-notch-content-in w-full h-full rounded-2xl border border-zinc-800 bg-zinc-950 flex flex-col items-center justify-between py-2 px-1 shadow-[0_6px_16px_rgba(0,0,0,0.6)] overflow-hidden"
+            >
               {/* Mini Window Controls */}
               <div
                 className="flex items-center justify-center gap-0.5 w-full shrink-0"

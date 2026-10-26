@@ -57,6 +57,13 @@ const NOTCH_SIZES = {
   }
 };
 
+const NOTCH_ANIMATION_DURATION_MS = 180;
+const NOTCH_ANIMATION_FRAME_MS = 12;
+const NOTCH_MOVE_COOLDOWN_MS = 100;
+
+let notchAnimationTimer = null;
+let notchAnimationCooldownTimer = null;
+
 // Mulai backend local engine (yt-dlp + ffmpeg server) di background
 function startLocalServer() {
   try {
@@ -222,8 +229,84 @@ function getNotchBounds(dock = notchDock, collapsed = isNotchCollapsed) {
   return calculateSnappedBounds(referenceBounds, dock, collapsed);
 }
 
+function stopNotchBoundsAnimation() {
+  if (notchAnimationTimer) {
+    clearInterval(notchAnimationTimer);
+    notchAnimationTimer = null;
+  }
+
+  if (notchAnimationCooldownTimer) {
+    clearTimeout(notchAnimationCooldownTimer);
+    notchAnimationCooldownTimer = null;
+  }
+}
+
+function isNotchBoundsAnimating() {
+  return Boolean(notchAnimationTimer || notchAnimationCooldownTimer);
+}
+
+function easeOutCubic(progress) {
+  return 1 - Math.pow(1 - progress, 3);
+}
+
+/**
+ * Menganimasikan bounds jendela notch secara bertahap agar transisi
+ * collapse/expand terasa halus, bukan lompatan ukuran instan.
+ * @param {{ x: number, y: number, width: number, height: number }} targetBounds
+ */
+function animateNotchBounds(targetBounds) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  stopNotchBoundsAnimation();
+
+  const startBounds = mainWindow.getBounds();
+  const distance =
+    Math.abs(startBounds.x - targetBounds.x) +
+    Math.abs(startBounds.y - targetBounds.y) +
+    Math.abs(startBounds.width - targetBounds.width) +
+    Math.abs(startBounds.height - targetBounds.height);
+
+  if (distance < 2) {
+    mainWindow.setBounds(targetBounds);
+    return;
+  }
+
+  const startedAt = Date.now();
+
+  notchAnimationTimer = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      stopNotchBoundsAnimation();
+      return;
+    }
+
+    const progress = Math.min((Date.now() - startedAt) / NOTCH_ANIMATION_DURATION_MS, 1);
+
+    if (progress >= 1) {
+      mainWindow.setBounds(targetBounds);
+      stopNotchBoundsAnimation();
+
+      // NOTE: Event 'moved' di Windows dapat tertunda setelah setBounds
+      // terakhir. Beri jeda singkat agar snapping tidak menimpa hasil animasi.
+      notchAnimationCooldownTimer = setTimeout(() => {
+        notchAnimationCooldownTimer = null;
+      }, NOTCH_MOVE_COOLDOWN_MS);
+      return;
+    }
+
+    const eased = easeOutCubic(progress);
+    mainWindow.setBounds({
+      x: Math.round(startBounds.x + (targetBounds.x - startBounds.x) * eased),
+      y: Math.round(startBounds.y + (targetBounds.y - startBounds.y) * eased),
+      width: Math.round(startBounds.width + (targetBounds.width - startBounds.width) * eased),
+      height: Math.round(startBounds.height + (targetBounds.height - startBounds.height) * eased)
+    });
+  }, NOTCH_ANIMATION_FRAME_MS);
+}
+
 function handleWindowMoved() {
-  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) return;
+  if (!mainWindow || mainWindow.isDestroyed() || !notchMode || isNotchBoundsAnimating()) {
+    return;
+  }
 
   const currentBounds = mainWindow.getBounds();
   const nextDock = detectNearestDockEdge(currentBounds);
@@ -248,8 +331,11 @@ function setNotchCollapsed(collapsed) {
   isNotchCollapsed = nextCollapsed;
   const targetBounds = getNotchBounds(notchDock, isNotchCollapsed);
   lastNotchBounds = targetBounds;
-  mainWindow.setBounds(targetBounds);
+
+  // State dikirim lebih dulu agar konten notch berganti bersamaan dengan
+  // awal animasi ukuran jendela.
   sendWindowState();
+  animateNotchBounds(targetBounds);
   return getWindowState();
 }
 
@@ -301,6 +387,8 @@ function enterNotchMode() {
     return getWindowState();
   }
 
+  stopNotchBoundsAnimation();
+
   const wasMaximized = mainWindow.isMaximized();
   const bounds = wasMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds();
   const [minWidth, minHeight] = mainWindow.getMinimumSize();
@@ -351,6 +439,7 @@ function exitNotchMode(maximize = false) {
   }
 
   clearNotchEntryTransition();
+  stopNotchBoundsAnimation();
   lastNotchBounds = mainWindow.getBounds();
 
   const saved = savedWindowState;
@@ -502,6 +591,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     clearNotchEntryTransition();
+    stopNotchBoundsAnimation();
     mainWindow = null;
     notchMode = false;
     savedWindowState = null;
