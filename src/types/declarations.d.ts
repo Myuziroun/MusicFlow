@@ -37,7 +37,6 @@ interface MusicFlowDesktopAPI {
   close: () => void;
   enterNotchMode: () => Promise<DesktopWindowState>;
   exitNotchMode: (options?: { maximize?: boolean }) => Promise<DesktopWindowState>;
-  setNotchCollapsed: (collapsed: boolean) => Promise<DesktopWindowState>;
   getWindowState: () => Promise<DesktopWindowState>;
   onWindowStateChange: (listener: (state: DesktopWindowState) => void) => () => void;
 }

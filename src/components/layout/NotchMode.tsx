@@ -7,10 +7,9 @@ import { formatDuration } from '../../utils/formatters';
 const notchControlClass =
   'w-6 h-6 shrink-0 rounded flex items-center justify-center text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-white focus:outline-none focus-visible:bg-zinc-800';
 
-// Delay auto-shrink singkat agar notch cepat mengecil saat kursor tidak aktif,
-// baik ketika kursor berada di dalam maupun di luar area notch.
-const COLLAPSE_DELAY_MS = 500;
-
+// NOTE: Deteksi kursor untuk ekspansi/menciut dilakukan oleh main process.
+// Area drag pada window notch menelan event mouse di renderer sehingga hover
+// tidak pernah terdeteksi di area selain elemen no-drag.
 export const NotchMode: React.FC = () => {
   const { isNotchMode, notchDock = 'top', isNotchCollapsed = false } = useDesktopWindow();
   const {
@@ -23,7 +22,6 @@ export const NotchMode: React.FC = () => {
   const { currentTime, duration } = usePlayerProgress();
   const api = window.musicflowDesktop;
   const wasNotchModeRef = useRef<boolean>(false);
-  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Bersihkan modal berat saat masuk ke mode notch
   useEffect(() => {
@@ -34,58 +32,13 @@ export const NotchMode: React.FC = () => {
     wasNotchModeRef.current = isNotchMode;
   }, [isNotchMode, setIsPlayerModalOpen, setIsQueueModalOpen]);
 
-  // Manajemen auto-shrink setelah delay inaktivitas kursor (COLLAPSE_DELAY_MS)
-  const clearCollapseTimer = () => {
-    if (collapseTimerRef.current) {
-      clearTimeout(collapseTimerRef.current);
-      collapseTimerRef.current = null;
-    }
-  };
-
-  const scheduleCollapse = () => {
-    clearCollapseTimer();
-    collapseTimerRef.current = setTimeout(() => {
-      void api?.setNotchCollapsed(true);
-    }, COLLAPSE_DELAY_MS);
-  };
-
-  const handleMouseEnter = () => {
-    clearCollapseTimer();
-    if (isNotchCollapsed) {
-      void api?.setNotchCollapsed(false);
-    }
-    scheduleCollapse();
-  };
-
-  const handleMouseMove = () => {
-    if (isNotchCollapsed) {
-      void api?.setNotchCollapsed(false);
-    }
-    scheduleCollapse();
-  };
-
-  const handleMouseLeave = () => {
-    scheduleCollapse();
-  };
-
-  useEffect(() => {
-    if (isNotchMode) {
-      scheduleCollapse();
-    }
-    return () => {
-      clearCollapseTimer();
-    };
-  }, [isNotchMode]);
-
   if (!isNotchMode) return null;
 
   const restoreWindow = () => {
-    clearCollapseTimer();
     void api?.exitNotchMode({ maximize: false });
   };
 
   const maximizeWindow = () => {
-    clearCollapseTimer();
     void api?.exitNotchMode({ maximize: true });
   };
 
@@ -106,9 +59,6 @@ export const NotchMode: React.FC = () => {
       data-drag-region="true"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       onDoubleClick={handleDoubleClick}
-      onMouseEnter={handleMouseEnter}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
       className="h-screen w-screen bg-black overflow-hidden select-none"
     >
       {/* 1. Tampilan Landscape (Dock: Top) */}

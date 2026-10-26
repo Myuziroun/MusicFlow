@@ -61,8 +61,17 @@ const NOTCH_ANIMATION_DURATION_MS = 180;
 const NOTCH_ANIMATION_FRAME_MS = 12;
 const NOTCH_MOVE_COOLDOWN_MS = 100;
 
+// Pemantauan posisi kursor dilakukan main process karena area drag pada
+// window notch menelan event mouse di renderer, sehingga hover tidak andal.
+const NOTCH_CURSOR_POLL_MS = 50;
+
+// Masa tenggang sebelum notch mengecil setelah kursor keluar dari area notch.
+const NOTCH_COLLAPSE_DELAY_MS = 500;
+
 let notchAnimationTimer = null;
 let notchAnimationCooldownTimer = null;
+let notchCursorTimer = null;
+let notchCollapseTimer = null;
 
 // Mulai backend local engine (yt-dlp + ffmpeg server) di background
 function startLocalServer() {
@@ -182,7 +191,26 @@ function detectNearestDockEdge(bounds) {
   }
 }
 
-function calculateSnappedBounds(referenceBounds, dock = notchDock, collapsed = isNotchCollapsed) {
+/**
+ * Menentukan bounds notch sesuai dock dan kondisi menciut/membesar.
+ *
+ * @param {{ x: number, y: number, width: number, height: number }} referenceBounds
+ *   Bounds acuan, umumnya posisi notch saat ini.
+ * @param {'top'|'left'|'right'} dock
+ * @param {boolean} collapsed
+ * @param {'center'|'bottom'} anchor
+ *   'center' untuk penempatan awal dan snapping setelah drag.
+ *   'bottom' untuk transisi collapse/expand agar tepi bawah dock kiri/kanan
+ *   tidak bergeser sehingga tombol Play/Pause tetap di tempatnya. Dock atas
+ *   selalu menempel di tepi atas layar sehingga anchor ini tidak berpengaruh.
+ * @returns {{ x: number, y: number, width: number, height: number }}
+ */
+function calculateSnappedBounds(
+  referenceBounds,
+  dock = notchDock,
+  collapsed = isNotchCollapsed,
+  anchor = 'center'
+) {
   const display = screen.getDisplayMatching(referenceBounds) || screen.getPrimaryDisplay();
   const { workArea } = display;
   const size = NOTCH_SIZES[dock][collapsed ? 'collapsed' : 'expanded'];
@@ -195,15 +223,17 @@ function calculateSnappedBounds(referenceBounds, dock = notchDock, collapsed = i
     const centerX = referenceBounds.x + referenceBounds.width / 2;
     x = Math.round(centerX - size.width / 2);
     x = Math.min(Math.max(x, workArea.x), workArea.x + workArea.width - size.width);
-  } else if (dock === 'left') {
-    x = workArea.x;
-    const centerY = referenceBounds.y + referenceBounds.height / 2;
-    y = Math.round(centerY - size.height / 2);
-    y = Math.min(Math.max(y, workArea.y), workArea.y + workArea.height - size.height);
-  } else if (dock === 'right') {
-    x = workArea.x + workArea.width - size.width;
-    const centerY = referenceBounds.y + referenceBounds.height / 2;
-    y = Math.round(centerY - size.height / 2);
+  } else if (dock === 'left' || dock === 'right') {
+    x = dock === 'left' ? workArea.x : workArea.x + workArea.width - size.width;
+
+    if (anchor === 'bottom') {
+      const bottom = referenceBounds.y + referenceBounds.height;
+      y = Math.round(bottom - size.height);
+    } else {
+      const centerY = referenceBounds.y + referenceBounds.height / 2;
+      y = Math.round(centerY - size.height / 2);
+    }
+
     y = Math.min(Math.max(y, workArea.y), workArea.y + workArea.height - size.height);
   }
 
@@ -215,7 +245,7 @@ function calculateSnappedBounds(referenceBounds, dock = notchDock, collapsed = i
   };
 }
 
-function getNotchBounds(dock = notchDock, collapsed = isNotchCollapsed) {
+function getNotchBounds(dock = notchDock, collapsed = isNotchCollapsed, anchor = 'center') {
   const referenceBounds =
     lastNotchBounds ||
     savedWindowState?.bounds ||
@@ -226,7 +256,7 @@ function getNotchBounds(dock = notchDock, collapsed = isNotchCollapsed) {
       height: NOTCH_SIZES.top.expanded.height
     };
 
-  return calculateSnappedBounds(referenceBounds, dock, collapsed);
+  return calculateSnappedBounds(referenceBounds, dock, collapsed, anchor);
 }
 
 function stopNotchBoundsAnimation() {
@@ -319,24 +349,97 @@ function handleWindowMoved() {
 }
 
 function setNotchCollapsed(collapsed) {
-  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) {
-    return getWindowState();
-  }
+  if (!mainWindow || mainWindow.isDestroyed() || !notchMode) return;
 
   const nextCollapsed = Boolean(collapsed);
-  if (isNotchCollapsed === nextCollapsed) {
-    return getWindowState();
-  }
+  if (isNotchCollapsed === nextCollapsed) return;
 
+  clearNotchCollapseTimer();
   isNotchCollapsed = nextCollapsed;
-  const targetBounds = getNotchBounds(notchDock, isNotchCollapsed);
+
+  // Anchor 'bottom' agar tepi bawah dock kiri/kanan tetap stabil sehingga
+  // tombol Play/Pause tidak bergeser saat notch membesar atau menciut.
+  const targetBounds = getNotchBounds(notchDock, isNotchCollapsed, 'bottom');
   lastNotchBounds = targetBounds;
 
   // State dikirim lebih dulu agar konten notch berganti bersamaan dengan
   // awal animasi ukuran jendela.
   sendWindowState();
   animateNotchBounds(targetBounds);
-  return getWindowState();
+}
+
+function clearNotchCollapseTimer() {
+  if (notchCollapseTimer) {
+    clearTimeout(notchCollapseTimer);
+    notchCollapseTimer = null;
+  }
+}
+
+function scheduleNotchCollapse() {
+  if (notchCollapseTimer) return;
+
+  notchCollapseTimer = setTimeout(() => {
+    notchCollapseTimer = null;
+
+    if (!notchMode || !mainWindow || mainWindow.isDestroyed()) return;
+
+    // Cek ulang posisi kursor agar notch tidak mengecil ketika kursor sudah
+    // kembali masuk saat masa tenggang berjalan.
+    if (isCursorInsideNotch() || isNotchCollapsed || isNotchBoundsAnimating()) return;
+
+    setNotchCollapsed(true);
+  }, NOTCH_COLLAPSE_DELAY_MS);
+}
+
+function isCursorInsideNotch() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+
+  const point = screen.getCursorScreenPoint();
+  const bounds = mainWindow.getBounds();
+
+  return (
+    point.x >= bounds.x &&
+    point.x < bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y < bounds.y + bounds.height
+  );
+}
+
+function handleNotchCursorTick() {
+  if (!notchMode || !mainWindow || mainWindow.isDestroyed()) {
+    stopNotchCursorTracking();
+    return;
+  }
+
+  if (isCursorInsideNotch()) {
+    // Selama kursor berada di dalam notch, notch selalu membesar dan
+    // penciutan dibatalkan tanpa memakai timer inaktivitas.
+    clearNotchCollapseTimer();
+
+    if (isNotchCollapsed) {
+      setNotchCollapsed(false);
+    }
+
+    return;
+  }
+
+  if (!isNotchCollapsed && !isNotchBoundsAnimating()) {
+    scheduleNotchCollapse();
+  }
+}
+
+function startNotchCursorTracking() {
+  if (notchCursorTimer) return;
+  notchCursorTimer = setInterval(handleNotchCursorTick, NOTCH_CURSOR_POLL_MS);
+}
+
+function stopNotchCursorTracking() {
+  if (notchCursorTimer) {
+    clearInterval(notchCursorTimer);
+    notchCursorTimer = null;
+  }
+
+  clearNotchCollapseTimer();
 }
 
 function clearNotchEntryTransition() {
@@ -380,6 +483,9 @@ function applyNotchMode() {
   }, 150);
 
   sendWindowState();
+
+  // Mulai memantau posisi kursor untuk ekspansi dan penciutan notch.
+  startNotchCursorTracking();
 }
 
 function enterNotchMode() {
@@ -440,6 +546,7 @@ function exitNotchMode(maximize = false) {
 
   clearNotchEntryTransition();
   stopNotchBoundsAnimation();
+  stopNotchCursorTracking();
   lastNotchBounds = mainWindow.getBounds();
 
   const saved = savedWindowState;
@@ -545,9 +652,11 @@ function createWindow() {
     }
   });
 
-  // Pembersihan cache sesaat saat jendela diminimalkan agar konsumsi RAM turun
+  // Pembersihan cache sesaat saat jendela diminimalkan agar konsumsi RAM turun.
+  // Pemantauan kursor notch juga dihentikan karena jendela tidak terlihat.
   mainWindow.on('minimize', () => {
     cancelPendingNotchEntry();
+    stopNotchCursorTracking();
     if (mainWindow && mainWindow.webContents) {
       mainWindow.webContents.session.clearCache().catch(() => {});
     }
@@ -568,7 +677,11 @@ function createWindow() {
     sendWindowState();
   });
   mainWindow.on('unmaximize', sendWindowState);
-  mainWindow.on('restore', sendWindowState);
+  mainWindow.on('restore', () => {
+    sendWindowState();
+    if (notchMode) startNotchCursorTracking();
+  });
+  mainWindow.on('hide', stopNotchCursorTracking);
   mainWindow.on('moved', handleWindowMoved);
   mainWindow.webContents.on('did-finish-load', sendWindowState);
 
@@ -592,6 +705,7 @@ function createWindow() {
   mainWindow.on('closed', () => {
     clearNotchEntryTransition();
     stopNotchBoundsAnimation();
+    stopNotchCursorTracking();
     mainWindow = null;
     notchMode = false;
     savedWindowState = null;
@@ -638,11 +752,6 @@ function registerWindowIpc() {
   ipcMain.handle('window:enter-notch', (event) => {
     if (!isMainWindowSender(event)) return getWindowState();
     return enterNotchMode();
-  });
-
-  ipcMain.handle('window:set-notch-collapsed', (event, collapsed) => {
-    if (!isMainWindowSender(event)) return getWindowState();
-    return setNotchCollapsed(collapsed);
   });
 
   ipcMain.handle('window:exit-notch', (event, options) => {

@@ -18,7 +18,6 @@ contextBridge.exposeInMainWorld('musicflowDesktop', {
   close: () => ipcRenderer.send('window:close'),
   enterNotchMode: () => ipcRenderer.invoke('window:enter-notch'),
   exitNotchMode: (options) => ipcRenderer.invoke('window:exit-notch', options),
-  setNotchCollapsed: (collapsed) => ipcRenderer.invoke('window:set-notch-collapsed', collapsed),
   getWindowState: () => ipcRenderer.invoke('window:get-state'),
   onWindowStateChange: (listener) => {
     if (typeof listener !== 'function') {
