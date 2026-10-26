@@ -60,3 +60,38 @@
     animation: none;
   }
 }
+
+/* Mini Equalizer Waveform untuk Mode Notch */
+@keyframes notch-eq-bounce {
+  0%, 100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.animate-notch-eq {
+  transform-origin: bottom;
+  animation: notch-eq-bounce 0.85s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.animate-notch-eq-delay-1 {
+  animation-delay: 0.15s;
+}
+
+.animate-notch-eq-delay-2 {
+  animation-delay: 0.3s;
+}
+
+.animate-notch-eq-delay-3 {
+  animation-delay: 0.45s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-notch-content-in,
+  .animate-notch-eq {
+    animation: none;
+  }
+}

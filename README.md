@@ -48,6 +48,8 @@ MusicFlow adalah aplikasi pemutar musik dan pengunduh audio YouTube lintas platf
      - Deteksi posisi kursor dilakukan oleh main process Electron setiap 50 ms sehingga area drag pada jendela notch tetap berfungsi tanpa mematikan deteksi hover.
      - Dock kiri dan kanan mengunci tepi bawah pada saat transisi sehingga tombol putar/jeda tidak bergeser ketika notch membesar atau menciut.
      - Transisi ukuran jendela dianimasikan secara halus (easing `ease-out`), disertai efek fade dan scale lembut pada konten notch saat berganti antara tampilan penuh dan kapsul.
+     - Desain kapsul tunggal presisi (single-border): batas luar menyatu tanpa nesting ganda, celah luar hitam dihilangkan, dan cover art tampil bersih tanpa bingkai tambahan.
+     - Kontrol pemutar lengkap pada mode membesar: dilengkapi tombol lagu sebelumnya, putar/jeda, lagu berikutnya, bilah progres interaktif (seekable), serta animasi equalizer mini saat musik diputar.
      - Tampilan status ringkas saat menciut: menampilkan cover art mini, teks durasi berjalan, serta tombol putar/jeda.
      - Pengecilan dimensi fisik BrowserWindow Electron secara riil saat menciut sehingga tidak ada hitbox transparan yang menghalangi klik pada aplikasi desktop lain.
 

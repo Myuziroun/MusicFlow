@@ -44,15 +44,15 @@ let lastNotchBounds = null;
 
 const NOTCH_SIZES = {
   top: {
-    expanded: { width: 380, height: 60 },
+    expanded: { width: 400, height: 68 },
     collapsed: { width: 190, height: 42 }
   },
   left: {
-    expanded: { width: 76, height: 260 },
+    expanded: { width: 84, height: 300 },
     collapsed: { width: 48, height: 140 }
   },
   right: {
-    expanded: { width: 76, height: 260 },
+    expanded: { width: 84, height: 300 },
     collapsed: { width: 48, height: 140 }
   }
 };
@@ -466,6 +466,7 @@ function applyNotchMode() {
   if (!mainWindow || mainWindow.isDestroyed() || !notchMode) return;
 
   mainWindow.setMinimumSize(0, 0);
+  mainWindow.setBackgroundColor('#09090b');
   mainWindow.setBounds(getNotchBounds());
   mainWindow.setResizable(false);
   mainWindow.setMaximizable(false);
@@ -556,6 +557,7 @@ function exitNotchMode(maximize = false) {
 
   mainWindow.setAlwaysOnTop(false);
   mainWindow.setSkipTaskbar(false);
+  mainWindow.setBackgroundColor('#000000');
   mainWindow.setResizable(true);
   mainWindow.setMaximizable(true);
   mainWindow.setMinimumSize(saved.minWidth, saved.minHeight);
